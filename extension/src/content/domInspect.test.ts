@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { makeSelector, inspectSelector, inspectElement, setupInspectHandler } from './domInspect.js';
+import { makeSelector, inspectSelector, inspectElement, setupInspectHandler, findElement } from './domInspect.js';
 import { BrowserControlsError } from '../shared/errors.js';
 
 // Test helper to create DOM elements
@@ -77,34 +77,90 @@ describe('makeSelector', () => {
   });
 });
 
+describe('findElement', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should return HTMLElement when element found', () => {
+    document.body.appendChild(createElement('div', { id: 'find-test' }));
+    const el = findElement('#find-test');
+    expect(el).toBeTruthy();
+    expect(el instanceof HTMLElement).toBe(true);
+    expect(el.id).toBe('find-test');
+  });
+
+  it('should throw BrowserControlsError with ELEMENT_NOT_FOUND for non-existent selector', () => {
+    expect(() => findElement('#non-existent')).toThrow(BrowserControlsError);
+    try {
+      findElement('#non-existent');
+    } catch (e) {
+      expect(e).toBeInstanceOf(BrowserControlsError);
+      expect((e as BrowserControlsError).code).toBe('ELEMENT_NOT_FOUND');
+      expect((e as BrowserControlsError).message).toBe('No element matches selector');
+    }
+  });
+});
+
 describe('inspectSelector', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
   });
 
-  it('should find element by id selector', () => {
-    document.body.appendChild(createElement('div', { id: 'test-id' }));
-    const el = inspectSelector('#test-id');
-    expect(el).toBeTruthy();
-    expect(el!.id).toBe('test-id');
+  it('should return InspectResult with selector, tag, id for element found by id', () => {
+    document.body.appendChild(createElement('div', { id: 'inspect-target', className: 'test-class' }));
+    const result = inspectSelector('#inspect-target');
+    
+    expect(result).toBeTruthy();
+    expect(result).toHaveProperty('selector');
+    expect(result).toHaveProperty('tag');
+    expect(result).toHaveProperty('id');
+    expect(result).toHaveProperty('xpath');
+    expect(result).toHaveProperty('classes');
+    expect(result).toHaveProperty('textSnippet');
+    expect(result).toHaveProperty('attributes');
+    expect(result).toHaveProperty('bounds');
+    expect(result).toHaveProperty('visible');
+    
+    expect(result.selector).toBe('#inspect-target');
+    expect(result.tag).toBe('div');
+    expect(result.id).toBe('inspect-target');
+    expect(result.classes).toContain('test-class');
   });
 
-  it('should find element by class selector', () => {
-    document.body.appendChild(createElement('div', { className: 'test-class' }));
-    const el = inspectSelector('div.test-class');
-    expect(el).toBeTruthy();
-    expect(el!.className).toBe('test-class');
+  it('should return InspectResult with xpath for element found by class', () => {
+    document.body.appendChild(createElement('div', { className: 'inspectable-class', textContent: 'Hello' }));
+    const result = inspectSelector('div.inspectable-class');
+    
+    expect(result).toHaveProperty('xpath');
+    expect(result.xpath.length).toBeGreaterThan(0);
+    expect(result.textSnippet).toBe('Hello');
   });
 
-  it('should find element by nth-child selector', () => {
-    const parent = createElement('ul');
-    parent.appendChild(createElement('li'));
-    parent.appendChild(createElement('li'));
-    parent.appendChild(createElement('li'));
-    document.body.appendChild(parent);
+  it('should return InspectResult with textSnippet for element with text', () => {
+    document.body.appendChild(createElement('p', { textContent: 'This is some text content' }));
+    const result = inspectSelector('p');
+    
+    expect(result.textSnippet).toContain('This is some text content');
+  });
 
-    const el = inspectSelector('li:nth-child(2)');
-    expect(el).toBeTruthy();
+  it('should return InspectResult with attributes when element has allowlisted attrs', () => {
+    const el = createElement('input', {
+      type: 'text',
+      name: 'username',
+      'data-testid': 'login-input',
+      placeholder: 'Enter username',
+    });
+    document.body.appendChild(el);
+    
+    const result = inspectSelector('input');
+    
+    expect(result.attributes).toHaveProperty('type');
+    expect(result.attributes).toHaveProperty('name');
+    expect(result.attributes).toHaveProperty('data-testid');
+    expect(result.attributes).toHaveProperty('placeholder');
+    expect(result.attributes.type).toBe('text');
+    expect(result.attributes.name).toBe('username');
   });
 
   it('should throw BrowserControlsError with ELEMENT_NOT_FOUND for non-existent selector', () => {
@@ -116,11 +172,6 @@ describe('inspectSelector', () => {
       expect((e as BrowserControlsError).code).toBe('ELEMENT_NOT_FOUND');
       expect((e as BrowserControlsError).message).toBe('No element matches selector');
     }
-  });
-
-  it('should throw BrowserControlsError when selector matches no elements', () => {
-    document.body.appendChild(createElement('div', { className: 'other' }));
-    expect(() => inspectSelector('div.nonexistent-class')).toThrow(BrowserControlsError);
   });
 
   it('should throw for invalid selector', () => {
@@ -281,46 +332,44 @@ describe('setupInspectHandler', () => {
     vi.restoreAllMocks();
   });
 
-  it('should register message listener', () => {
-    const addEventListenerSpy = vi.fn();
-    vi.stubGlobal('window', {
-      addEventListener: addEventListenerSpy,
-      // Mock chrome.runtime for the sendMessage fallback
-      chrome: { runtime: { sendMessage: vi.fn() } },
-    });
-
-    setupInspectHandler();
-
-    expect(addEventListenerSpy).toHaveBeenCalledWith('message', expect.any(Function));
+  it('should return a handler function', () => {
+    const sendMessageMock = vi.fn();
+    const handler = setupInspectHandler({ sendMessage: sendMessageMock });
+    expect(typeof handler).toBe('function');
   });
 
-  it('should respond to inspect request with result', async () => {
+  it('should return true when handling inspect method', async () => {
     const sendMessageMock = vi.fn();
-    let messageHandler: ((event: MessageEvent) => void) | null = null;
+    const handler = setupInspectHandler({ sendMessage: sendMessageMock });
 
-    vi.stubGlobal('window', {
-      addEventListener: (_event: string, listener: (event: MessageEvent) => void) => {
-        messageHandler = listener;
-      },
-    });
-
-    setupInspectHandler({ sendMessage: sendMessageMock });
-
-    // Setup DOM for inspection
     document.body.innerHTML = '<div id="inspectable"><span>Test content</span></div>';
 
-    // Create mock event with source = window
-    const mockEvent = {
-      source: window,
-      data: JSON.stringify({
-        method: 'inspect',
-        params: { selector: '#inspectable' },
-      }),
-    } as unknown as MessageEvent;
+    const message = {
+      method: 'inspect',
+      params: { selector: '#inspectable' },
+    };
+    const sendResponse = vi.fn();
 
-    await messageHandler!(mockEvent);
+    const result = handler(message, {}, sendResponse);
 
-    expect(sendMessageMock).toHaveBeenCalledWith(
+    expect(result).toBe(true);
+  });
+
+  it('should call sendResponse with ok:true and InspectResult for valid selector', async () => {
+    const sendMessageMock = vi.fn();
+    const handler = setupInspectHandler({ sendMessage: sendMessageMock });
+
+    document.body.innerHTML = '<div id="inspectable"><span>Test content</span></div>';
+
+    const message = {
+      method: 'inspect',
+      params: { selector: '#inspectable' },
+    };
+    const sendResponse = vi.fn();
+
+    handler(message, {}, sendResponse);
+
+    expect(sendResponse).toHaveBeenCalledWith(
       expect.objectContaining({
         ok: true,
         result: expect.objectContaining({
@@ -332,29 +381,19 @@ describe('setupInspectHandler', () => {
     );
   });
 
-  it('should respond with error for ELEMENT_NOT_FOUND', async () => {
+  it('should call sendResponse with ok:false and error for ELEMENT_NOT_FOUND', async () => {
     const sendMessageMock = vi.fn();
-    let messageHandler: ((event: MessageEvent) => void) | null = null;
+    const handler = setupInspectHandler({ sendMessage: sendMessageMock });
 
-    vi.stubGlobal('window', {
-      addEventListener: (_event: string, listener: (event: MessageEvent) => void) => {
-        messageHandler = listener;
-      },
-    });
+    const message = {
+      method: 'inspect',
+      params: { selector: '#does-not-exist' },
+    };
+    const sendResponse = vi.fn();
 
-    setupInspectHandler({ sendMessage: sendMessageMock });
+    handler(message, {}, sendResponse);
 
-    const mockEvent = {
-      source: window,
-      data: JSON.stringify({
-        method: 'inspect',
-        params: { selector: '#does-not-exist' },
-      }),
-    } as unknown as MessageEvent;
-
-    await messageHandler!(mockEvent);
-
-    expect(sendMessageMock).toHaveBeenCalledWith(
+    expect(sendResponse).toHaveBeenCalledWith(
       expect.objectContaining({
         ok: false,
         error: expect.objectContaining({
@@ -365,55 +404,44 @@ describe('setupInspectHandler', () => {
     );
   });
 
-  it('should ignore non-inspect method messages', async () => {
+  it('should return false and not call sendResponse for non-inspect methods', () => {
     const sendMessageMock = vi.fn();
-    let messageHandler: ((event: MessageEvent) => void) | null = null;
+    const handler = setupInspectHandler({ sendMessage: sendMessageMock });
 
-    vi.stubGlobal('window', {
-      addEventListener: (_event: string, listener: (event: MessageEvent) => void) => {
-        messageHandler = listener;
-      },
-    });
+    const message = {
+      method: 'navigate',
+      params: { url: 'https://example.com' },
+    };
+    const sendResponse = vi.fn();
 
-    setupInspectHandler({ sendMessage: sendMessageMock });
+    const result = handler(message, {}, sendResponse);
 
-    const mockEvent = {
-      source: window,
-      data: JSON.stringify({
-        method: 'navigate',
-        params: { url: 'https://example.com' },
-      }),
-    } as unknown as MessageEvent;
-
-    await messageHandler!(mockEvent);
-
-    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(result).toBe(false);
+    expect(sendResponse).not.toHaveBeenCalled();
   });
 
-  it('should ignore messages from other sources', async () => {
+  it('should handle string selector in params', async () => {
     const sendMessageMock = vi.fn();
-    let messageHandler: ((event: MessageEvent) => void) | null = null;
+    const handler = setupInspectHandler({ sendMessage: sendMessageMock });
 
-    vi.stubGlobal('window', {
-      addEventListener: (_event: string, listener: (event: MessageEvent) => void) => {
-        messageHandler = listener;
-      },
-    });
+    document.body.innerHTML = '<div class="test-class"></div>';
 
-    setupInspectHandler({ sendMessage: sendMessageMock });
+    const message = {
+      method: 'inspect',
+      params: { selector: 'div.test-class' },
+    };
+    const sendResponse = vi.fn();
 
-    // Create an iframe-like source (different from window)
-    const otherWindow = {};
-    const mockEvent = {
-      source: otherWindow,
-      data: JSON.stringify({
-        method: 'inspect',
-        params: { selector: '#anything' },
-      }),
-    } as unknown as MessageEvent;
+    handler(message, {}, sendResponse);
 
-    await messageHandler!(mockEvent);
-
-    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        result: expect.objectContaining({
+          tag: 'div',
+          classes: ['test-class'],
+        }),
+      })
+    );
   });
 });

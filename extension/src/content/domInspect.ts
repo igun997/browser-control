@@ -126,10 +126,10 @@ function isVisible(element: HTMLElement): boolean {
 }
 
 /**
- * Find element by CSS selector.
+ * Find element by CSS selector (internal helper).
  * @throws BrowserControlsError with code ELEMENT_NOT_FOUND if no element matches
  */
-export function inspectSelector(selector: string): HTMLElement | never {
+export function findElement(selector: string): HTMLElement | never {
   try {
     const element = document.querySelector<HTMLElement>(selector);
     if (!element) {
@@ -148,6 +148,15 @@ export function inspectSelector(selector: string): HTMLElement | never {
       'No element matches selector'
     );
   }
+}
+
+/**
+ * Inspect element by CSS selector and return detailed inspection result.
+ * @throws BrowserControlsError with code ELEMENT_NOT_FOUND if no element matches
+ */
+export function inspectSelector(selector: string): InspectResult | never {
+  const element = findElement(selector);
+  return inspectElement(element);
 }
 
 /**
@@ -198,48 +207,41 @@ export interface InspectHandlerOptions {
 }
 
 /**
- * Setup message handler for 'inspect' method.
+ * Setup message handler for 'inspect' method using chrome.runtime.onMessage.
  * Handles {method:'inspect', params:{selector}} messages and sends back results.
+ * Returns true if message was handled, false otherwise.
  */
-export function setupInspectHandler(options: InspectHandlerOptions = {}): void {
+export function setupInspectHandler(options: InspectHandlerOptions = {}): (message: object, _sender: object, sendResponse: (response?: { ok: boolean; result?: InspectResult; error?: { code: string; message: string } }) => void) => boolean {
   const sendMessage = options.sendMessage ?? ((message: { ok: boolean; result?: InspectResult; error?: { code: string; message: string } }) => {
     chrome.runtime.sendMessage(message);
   });
 
-  window.addEventListener('message', (event: MessageEvent) => {
-    // Only handle our own messages from content script
-    if (event.source !== window) return;
-
-    let data: { method: string; params?: { selector?: string } };
-    try {
-      data = JSON.parse(String(event.data));
-    } catch {
-      // Invalid JSON - ignore
-      return;
-    }
+  return (message: object, _sender: object, sendResponse: (response?: { ok: boolean; result?: InspectResult; error?: { code: string; message: string } }) => void): boolean => {
+    const data = message as { method: string; params?: { selector?: string } };
 
     // Only handle inspect method
-    if (data.method !== 'inspect') return;
+    if (data.method !== 'inspect') {
+      return false;
+    }
 
     const selector = data.params?.selector;
     if (!selector) {
-      sendMessage({
+      sendResponse({
         ok: false,
         error: {
           code: 'INVALID_PARAMS',
           message: 'Missing selector parameter',
         },
       });
-      return;
+      return true;
     }
 
     try {
-      const element = inspectSelector(selector);
-      const result = inspectElement(element);
-      sendMessage({ ok: true, result });
+      const result = inspectSelector(String(selector));
+      sendResponse({ ok: true, result });
     } catch (error) {
       if (error instanceof BrowserControlsError) {
-        sendMessage({
+        sendResponse({
           ok: false,
           error: {
             code: error.code,
@@ -247,7 +249,7 @@ export function setupInspectHandler(options: InspectHandlerOptions = {}): void {
           },
         });
       } else {
-        sendMessage({
+        sendResponse({
           ok: false,
           error: {
             code: 'INTERNAL_ERROR',
@@ -256,5 +258,14 @@ export function setupInspectHandler(options: InspectHandlerOptions = {}): void {
         });
       }
     }
-  });
+    return true;
+  };
+}
+
+/**
+ * Register the inspect handler with chrome.runtime.onMessage.
+ * Convenience function that calls setupInspectHandler and registers the returned listener.
+ */
+export function registerInspectHandler(options: InspectHandlerOptions = {}): void {
+  chrome.runtime.onMessage.addListener(setupInspectHandler(options));
 }
