@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CommandRouter } from './commandRouter.js';
 import { BrowserControlsError } from '../shared/errors.js';
+import type { DeepNetworkInspector } from './deepNetworkInspector.js';
 
 // Mock chrome API
 const mockChrome = {
@@ -14,13 +15,28 @@ const mockChrome = {
 
 vi.stubGlobal('chrome', mockChrome);
 
+// Mock DeepNetworkInspector
+function createMockDeepNetworkInspector() {
+  return {
+    start: vi.fn().mockResolvedValue({ tabId: 42, deepNetwork: 'started' }),
+    stop: vi.fn().mockResolvedValue({ tabId: 42, deepNetwork: 'stopped' }),
+    getResponseBody: vi.fn().mockResolvedValue({ body: 'response body', base64Encoded: false }),
+    handleEvent: vi.fn(),
+    isAttached: vi.fn().mockReturnValue(false),
+    getAttachedTabs: vi.fn().mockReturnValue([]),
+  };
+}
+
 describe('CommandRouter', () => {
   let router: CommandRouter;
+  let mockDeepInspector: DeepNetworkInspector;
 
   beforeEach(() => {
     vi.clearAllMocks();
     router = new CommandRouter();
     router.setActiveTabId(42);
+    mockDeepInspector = createMockDeepNetworkInspector() as unknown as DeepNetworkInspector;
+    router.setDeepNetworkInspector(mockDeepInspector);
   });
 
   afterEach(() => {
@@ -338,6 +354,7 @@ describe('CommandRouter', () => {
 
     it('should use active tab from chrome.tabs.query when no activeTabId set', async () => {
       router = new CommandRouter(); // No activeTabId set
+      router.setDeepNetworkInspector(mockDeepInspector);
       mockChrome.tabs.query
         .mockResolvedValueOnce([{ id: 99, windowId: 2, active: true, currentWindow: true }])
         .mockResolvedValue([{ id: 99, windowId: 2 }]);
@@ -357,6 +374,7 @@ describe('CommandRouter', () => {
 
     it('should throw NO_ACTIVE_TAB when no active tab found', async () => {
       router = new CommandRouter();
+      router.setDeepNetworkInspector(mockDeepInspector);
       mockChrome.tabs.query.mockResolvedValue([]);
 
       await expect(
@@ -383,6 +401,7 @@ describe('CommandRouter', () => {
 
     it('should throw NO_ACTIVE_TAB when tab has no windowId', async () => {
       router = new CommandRouter(); // No activeTabId set
+      router.setDeepNetworkInspector(mockDeepInspector);
       mockChrome.tabs.query.mockResolvedValue([{ id: 99, active: true, currentWindow: true }]); // No windowId
 
       await expect(
@@ -405,6 +424,252 @@ describe('CommandRouter', () => {
         expect(e).toBeInstanceOf(BrowserControlsError);
         expect((e as BrowserControlsError).code).toBe('NO_ACTIVE_TAB');
       }
+    });
+  });
+
+  describe('deep network commands (network:deep:start, network:deep:stop, network:getResponseBody)', () => {
+    describe('network:deep:start', () => {
+      it('should start deep network monitoring on specified tab', async () => {
+        const result = await router.handle({
+          id: 'req-1',
+          type: 'request',
+          method: 'network:deep:start',
+          params: { tabId: 1 },
+        });
+
+        expect(mockDeepInspector.start).toHaveBeenCalledWith(1);
+        expect(result).toEqual({ tabId: 42, deepNetwork: 'started' });
+      });
+
+      it('should resolve "active" tabId from activeTabId', async () => {
+        const result = await router.handle({
+          id: 'req-1',
+          type: 'request',
+          method: 'network:deep:start',
+          params: { tabId: 'active' },
+        });
+
+        expect(mockDeepInspector.start).toHaveBeenCalledWith(42);
+        expect(result).toEqual({ tabId: 42, deepNetwork: 'started' });
+      });
+
+      it('should throw DEEP_NETWORK_UNAVAILABLE when inspector not set', async () => {
+        const routerWithoutInspector = new CommandRouter();
+
+        await expect(
+          routerWithoutInspector.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:deep:start',
+            params: { tabId: 1 },
+          })
+        ).rejects.toThrow(BrowserControlsError);
+
+        try {
+          await routerWithoutInspector.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:deep:start',
+            params: { tabId: 1 },
+          });
+        } catch (e) {
+          expect(e).toBeInstanceOf(BrowserControlsError);
+          expect((e as BrowserControlsError).code).toBe('DEEP_NETWORK_UNAVAILABLE');
+        }
+      });
+
+      it('should throw for invalid tab target', async () => {
+        await expect(
+          router.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:deep:start',
+            params: { tabId: 'invalid' },
+          })
+        ).rejects.toThrow();
+      });
+    });
+
+    describe('network:deep:stop', () => {
+      it('should stop deep network monitoring on specified tab', async () => {
+        const result = await router.handle({
+          id: 'req-1',
+          type: 'request',
+          method: 'network:deep:stop',
+          params: { tabId: 1 },
+        });
+
+        expect(mockDeepInspector.stop).toHaveBeenCalledWith(1);
+        expect(result).toEqual({ tabId: 42, deepNetwork: 'stopped' });
+      });
+
+      it('should resolve "active" tabId from activeTabId', async () => {
+        const result = await router.handle({
+          id: 'req-1',
+          type: 'request',
+          method: 'network:deep:stop',
+          params: { tabId: 'active' },
+        });
+
+        expect(mockDeepInspector.stop).toHaveBeenCalledWith(42);
+        expect(result).toEqual({ tabId: 42, deepNetwork: 'stopped' });
+      });
+
+      it('should throw DEEP_NETWORK_UNAVAILABLE when inspector not set', async () => {
+        const routerWithoutInspector = new CommandRouter();
+
+        await expect(
+          routerWithoutInspector.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:deep:stop',
+            params: { tabId: 1 },
+          })
+        ).rejects.toThrow(BrowserControlsError);
+
+        try {
+          await routerWithoutInspector.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:deep:stop',
+            params: { tabId: 1 },
+          });
+        } catch (e) {
+          expect(e).toBeInstanceOf(BrowserControlsError);
+          expect((e as BrowserControlsError).code).toBe('DEEP_NETWORK_UNAVAILABLE');
+        }
+      });
+    });
+
+    describe('network:getResponseBody', () => {
+      it('should get response body for specified requestId', async () => {
+        const result = await router.handle({
+          id: 'req-1',
+          type: 'request',
+          method: 'network:getResponseBody',
+          params: { tabId: 1, requestId: 'req-123' },
+        });
+
+        expect(mockDeepInspector.getResponseBody).toHaveBeenCalledWith(1, 'req-123');
+        expect(result).toEqual({ body: 'response body', base64Encoded: false });
+      });
+
+      it('should resolve "active" tabId from activeTabId', async () => {
+        const result = await router.handle({
+          id: 'req-1',
+          type: 'request',
+          method: 'network:getResponseBody',
+          params: { tabId: 'active', requestId: 'req-456' },
+        });
+
+        expect(mockDeepInspector.getResponseBody).toHaveBeenCalledWith(42, 'req-456');
+        expect(result).toEqual({ body: 'response body', base64Encoded: false });
+      });
+
+      it('should throw DEEP_NETWORK_UNAVAILABLE when inspector not set', async () => {
+        const routerWithoutInspector = new CommandRouter();
+
+        await expect(
+          routerWithoutInspector.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:getResponseBody',
+            params: { tabId: 1, requestId: 'req-123' },
+          })
+        ).rejects.toThrow(BrowserControlsError);
+
+        try {
+          await routerWithoutInspector.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:getResponseBody',
+            params: { tabId: 1, requestId: 'req-123' },
+          });
+        } catch (e) {
+          expect(e).toBeInstanceOf(BrowserControlsError);
+          expect((e as BrowserControlsError).code).toBe('DEEP_NETWORK_UNAVAILABLE');
+        }
+      });
+
+      it('should throw INVALID_REQUEST_ID when requestId is missing', async () => {
+        await expect(
+          router.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:getResponseBody',
+            params: { tabId: 1 },
+          })
+        ).rejects.toThrow(BrowserControlsError);
+
+        try {
+          await router.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:getResponseBody',
+            params: { tabId: 1 },
+          });
+        } catch (e) {
+          expect(e).toBeInstanceOf(BrowserControlsError);
+          expect((e as BrowserControlsError).code).toBe('INVALID_REQUEST_ID');
+        }
+      });
+
+      it('should throw INVALID_REQUEST_ID when requestId is not a string', async () => {
+        await expect(
+          router.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:getResponseBody',
+            params: { tabId: 1, requestId: 123 },
+          })
+        ).rejects.toThrow(BrowserControlsError);
+
+        try {
+          await router.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:getResponseBody',
+            params: { tabId: 1, requestId: 123 },
+          });
+        } catch (e) {
+          expect(e).toBeInstanceOf(BrowserControlsError);
+          expect((e as BrowserControlsError).code).toBe('INVALID_REQUEST_ID');
+        }
+      });
+
+      it('should throw INVALID_REQUEST_ID when requestId is empty string', async () => {
+        await expect(
+          router.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:getResponseBody',
+            params: { tabId: 1, requestId: '' },
+          })
+        ).rejects.toThrow(BrowserControlsError);
+
+        try {
+          await router.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:getResponseBody',
+            params: { tabId: 1, requestId: '' },
+          });
+        } catch (e) {
+          expect(e).toBeInstanceOf(BrowserControlsError);
+          expect((e as BrowserControlsError).code).toBe('INVALID_REQUEST_ID');
+        }
+      });
+
+      it('should throw for invalid tab target', async () => {
+        await expect(
+          router.handle({
+            id: 'req-1',
+            type: 'request',
+            method: 'network:getResponseBody',
+            params: { tabId: 'invalid', requestId: 'req-789' },
+          })
+        ).rejects.toThrow();
+      });
     });
   });
 
@@ -450,6 +715,15 @@ describe('CommandRouter', () => {
       router.setActiveTabId(100);
       router.setActiveTabId(200);
       router.setActiveTabId(undefined);
+      // No assertion needed - just verify no throws
+    });
+  });
+
+  describe('setDeepNetworkInspector', () => {
+    it('should allow setting and updating deep network inspector', () => {
+      const newInspector = createMockDeepNetworkInspector() as unknown as DeepNetworkInspector;
+      router.setDeepNetworkInspector(newInspector);
+      router.setDeepNetworkInspector(undefined as unknown as DeepNetworkInspector);
       // No assertion needed - just verify no throws
     });
   });

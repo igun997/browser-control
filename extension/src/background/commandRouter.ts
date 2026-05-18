@@ -1,5 +1,6 @@
 import { BrowserControlsError } from '../shared/errors.js';
 import { AgentRequest, resolveTabTarget } from '../shared/protocol.js';
+import type { DeepNetworkInspector } from './deepNetworkInspector.js';
 
 // Content script message types
 interface ContentMessage {
@@ -45,12 +46,20 @@ const CONTENT_SCRIPT_METHODS = new Set([
 
 export class CommandRouter {
   private activeTabId: number | undefined;
+  private deepNetworkInspector: DeepNetworkInspector | undefined;
 
   /**
    * Set the active tab ID for 'active' tab target resolution
    */
   setActiveTabId(tabId: number | undefined): void {
     this.activeTabId = tabId;
+  }
+
+  /**
+   * Set the DeepNetworkInspector for deep network debugging commands
+   */
+  setDeepNetworkInspector(inspector: DeepNetworkInspector): void {
+    this.deepNetworkInspector = inspector;
   }
 
   /**
@@ -65,6 +74,15 @@ export class CommandRouter {
 
       case 'screenshot':
         return this.handleScreenshot();
+
+      case 'network:deep:start':
+        return this.handleDeepNetworkStart(params);
+
+      case 'network:deep:stop':
+        return this.handleDeepNetworkStop(params);
+
+      case 'network:getResponseBody':
+        return this.handleGetResponseBody(params);
 
       default:
         if (CONTENT_SCRIPT_METHODS.has(method)) {
@@ -112,6 +130,54 @@ export class CommandRouter {
 
     const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' as const });
     return { dataUrl, tabId };
+  }
+
+  private async handleDeepNetworkStart(params: Record<string, unknown>): Promise<{ tabId: number; deepNetwork: 'started' }> {
+    if (!this.deepNetworkInspector) {
+      throw new BrowserControlsError(
+        'DEEP_NETWORK_UNAVAILABLE',
+        'Deep network inspector is not available'
+      );
+    }
+
+    const tabId = resolveTabIdParam(params.tabId, this.activeTabId);
+
+    return this.deepNetworkInspector.start(tabId);
+  }
+
+  private async handleDeepNetworkStop(params: Record<string, unknown>): Promise<{ tabId: number; deepNetwork: 'stopped' }> {
+    if (!this.deepNetworkInspector) {
+      throw new BrowserControlsError(
+        'DEEP_NETWORK_UNAVAILABLE',
+        'Deep network inspector is not available'
+      );
+    }
+
+    const tabId = resolveTabIdParam(params.tabId, this.activeTabId);
+
+    return this.deepNetworkInspector.stop(tabId);
+  }
+
+  private async handleGetResponseBody(params: Record<string, unknown>): Promise<unknown> {
+    if (!this.deepNetworkInspector) {
+      throw new BrowserControlsError(
+        'DEEP_NETWORK_UNAVAILABLE',
+        'Deep network inspector is not available'
+      );
+    }
+
+    const tabId = resolveTabIdParam(params.tabId, this.activeTabId);
+    const requestId = params.requestId;
+
+    // Validate requestId is a non-empty string
+    if (typeof requestId !== 'string' || requestId.length === 0) {
+      throw new BrowserControlsError(
+        'INVALID_REQUEST_ID',
+        'requestId must be a non-empty string'
+      );
+    }
+
+    return this.deepNetworkInspector.getResponseBody(tabId, requestId);
   }
 
   private async handleContentCommand(
