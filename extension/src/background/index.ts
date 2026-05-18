@@ -1,13 +1,15 @@
 import { createAgentSocket, getAgentSocket, AgentSocket } from './wsClient.js';
+import { CommandRouter } from './commandRouter.js';
 
 // Initialize the WebSocket connection with default settings
 const agentSocket = createAgentSocket();
 
-// Register a default request handler
+// Create command router
+const commandRouter = new CommandRouter();
+
+// Register request handler that routes to command router
 agentSocket.onRequest(async (request) => {
-  // Placeholder handler - actual handlers will be registered by commands module
-  console.log('Received request:', request.method, request.params);
-  return { success: true, message: 'Request received' };
+  return commandRouter.handle(request);
 });
 
 // Log connection status
@@ -27,4 +29,4 @@ agentSocket.onError((error) => {
 void agentSocket.connect();
 
 // Export for use by other modules
-export { agentSocket, getAgentSocket, AgentSocket };
+export { agentSocket, getAgentSocket, AgentSocket, commandRouter };
