@@ -2,19 +2,20 @@ import type { AgentEvent } from '../shared/protocol.js';
 
 /**
  * Interface for Chrome Debugger API (chrome.debugger)
+ * Supports optional lastError for error handling
  */
 export interface ChromeDebuggerApi {
   attach(
     target: { tabId: number },
     version: string,
-    callback?: () => void
+    callback?: (lastError?: { message: string }) => void
   ): void;
-  detach(target: { tabId: number }, callback?: () => void): void;
+  detach(target: { tabId: number }, callback?: (lastError?: { message: string }) => void): void;
   sendCommand(
     target: { tabId: number },
     method: string,
     params?: Record<string, unknown>,
-    callback?: (result: unknown) => void
+    callback?: (result: unknown, lastError?: { message: string }) => void
   ): void;
   onEvent: {
     addListener(callback: ChromeDebuggerEventCallback): void;
@@ -83,37 +84,35 @@ export class DeepNetworkInspector {
    * Start deep network monitoring for a tab
    * @param tabId - The tab ID to attach debugger to
    * @returns Promise resolving to start result
+   * @throws Error if attach or Network.enable fails
    */
   async start(tabId: number): Promise<StartResult> {
     return new Promise((resolve, reject) => {
-      this.debugger.attach(
-        { tabId },
-        '1.3',
-        () => {
-          this.attachedTabs.add(tabId);
+      this.debugger.attach({ tabId }, '1.3', (attachError) => {
+        if (attachError) {
+          reject(new Error(`Failed to attach debugger: ${attachError.message}`));
+          return;
+        }
 
-          // Send Network.enable command
-          this.debugger.sendCommand(
-            { tabId },
-            'Network.enable',
-            {},
-            (result) => {
-              if (result instanceof Error) {
-                reject(result);
-              } else {
-                resolve({ tabId, deepNetwork: 'started' });
-              }
+        // Send Network.enable command
+        this.debugger.sendCommand(
+          { tabId },
+          'Network.enable',
+          {},
+          (_result, enableError) => {
+            if (enableError) {
+              // Network.enable failed - detach and reject, don't leave tab tracked
+              this.debugger.detach({ tabId }, () => {
+                // Detach callback - ignore its error since we're already rejecting
+              });
+              reject(new Error(`Failed to enable Network: ${enableError.message}`));
+              return;
             }
-          );
-        }
-      );
-
-      // Handle attach errors (e.g., already attached)
-      setTimeout(() => {
-        if (!this.attachedTabs.has(tabId)) {
-          // Try to attach and let the callback handle resolution
-        }
-      }, 0);
+            this.attachedTabs.add(tabId);
+            resolve({ tabId, deepNetwork: 'started' });
+          }
+        );
+      });
     });
   }
 
@@ -121,15 +120,21 @@ export class DeepNetworkInspector {
    * Stop deep network monitoring for a tab
    * @param tabId - The tab ID to detach debugger from
    * @returns Promise resolving to stop result
+   * @throws Error if detach fails
    */
   async stop(tabId: number): Promise<StopResult> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       if (!this.attachedTabs.has(tabId)) {
         resolve({ tabId, deepNetwork: 'stopped' });
         return;
       }
 
-      this.debugger.detach({ tabId }, () => {
+      this.debugger.detach({ tabId }, (detachError) => {
+        if (detachError) {
+          // Detach failed - keep tracking, reject with error
+          reject(new Error(`Failed to detach debugger: ${detachError.message}`));
+          return;
+        }
         this.attachedTabs.delete(tabId);
         resolve({ tabId, deepNetwork: 'stopped' });
       });
@@ -141,6 +146,7 @@ export class DeepNetworkInspector {
    * @param tabId - The tab ID where the request was made
    * @param requestId - The request ID from the CDP event
    * @returns Promise resolving to the response body
+   * @throws Error if command fails
    */
   async getResponseBody(tabId: number, requestId: string): Promise<unknown> {
     if (typeof requestId !== 'string' || requestId.length === 0) {
@@ -152,12 +158,12 @@ export class DeepNetworkInspector {
         { tabId },
         'Network.getResponseBody',
         { requestId },
-        (result) => {
-          if (result instanceof Error) {
-            reject(result);
-          } else {
-            resolve(result);
+        (result, commandError) => {
+          if (commandError) {
+            reject(new Error(`Failed to get response body: ${commandError.message}`));
+            return;
           }
+          resolve(result);
         }
       );
     });
@@ -174,8 +180,13 @@ export class DeepNetworkInspector {
     method: string,
     params?: unknown
   ): void {
-    // Only process if source has tabId and method starts with 'Network.'
-    if (!source.tabId || !method.startsWith('Network.')) {
+    // Only process events for tabs that are currently attached
+    if (!source.tabId || !this.attachedTabs.has(source.tabId)) {
+      return;
+    }
+
+    // Only process Network.* events
+    if (!method.startsWith('Network.')) {
       return;
     }
 

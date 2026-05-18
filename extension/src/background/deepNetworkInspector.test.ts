@@ -89,10 +89,7 @@ describe('DeepNetworkInspector', () => {
       const inspector = new DeepNetworkInspector(emit);
 
       await inspector.start(42);
-
-      // Verify multiple starts don't fail (idempotent for start)
-      await inspector.start(42);
-      // The attach would be called twice, but that's the caller's responsibility
+      expect(inspector.isAttached(42)).toBe(true);
     });
 
     it('should return tabId and deepNetwork:started status', async () => {
@@ -111,6 +108,65 @@ describe('DeepNetworkInspector', () => {
 
       expect(result1).toEqual({ tabId: 42, deepNetwork: 'started' });
       expect(result2).toEqual({ tabId: 99, deepNetwork: 'started' });
+    });
+
+    it('should reject when attach fails', async () => {
+      mockDebugger.attach.mockImplementation((target, _version, callback) => {
+        if (callback) callback({ message: 'Target not found' });
+      });
+
+      const inspector = new DeepNetworkInspector(emit);
+
+      await expect(inspector.start(42)).rejects.toThrow('Failed to attach debugger: Target not found');
+      expect(inspector.isAttached(42)).toBe(false);
+    });
+
+    it('should reject when Network.enable fails', async () => {
+      mockDebugger.sendCommand.mockImplementation((target, method, _params, callback) => {
+        if (method === 'Network.enable' && callback) {
+          callback({}, { message: 'Protocol not available' });
+        }
+      });
+
+      const inspector = new DeepNetworkInspector(emit);
+
+      await expect(inspector.start(42)).rejects.toThrow('Failed to enable Network: Protocol not available');
+      expect(inspector.isAttached(42)).toBe(false);
+    });
+
+    it('should detach after Network.enable failure', async () => {
+      mockDebugger.sendCommand.mockImplementation((target, method, _params, callback) => {
+        if (method === 'Network.enable' && callback) {
+          callback({}, { message: 'Protocol not available' });
+        }
+      });
+
+      const inspector = new DeepNetworkInspector(emit);
+
+      try {
+        await inspector.start(42);
+      } catch {
+        // Expected to reject
+      }
+
+      expect(mockDebugger.detach).toHaveBeenCalledWith({ tabId: 42 }, expect.any(Function));
+    });
+
+    it('should not track tab when attach fails', async () => {
+      mockDebugger.attach.mockImplementation((target, _version, callback) => {
+        if (callback) callback({ message: 'Already attached to other target' });
+      });
+
+      const inspector = new DeepNetworkInspector(emit);
+
+      try {
+        await inspector.start(42);
+      } catch {
+        // Expected to reject
+      }
+
+      expect(inspector.isAttached(42)).toBe(false);
+      expect(inspector.getAttachedTabs()).toHaveLength(0);
     });
   });
 
@@ -134,10 +190,7 @@ describe('DeepNetworkInspector', () => {
       await inspector.start(42);
       await inspector.stop(42);
 
-      // After stop, trying to stop again should not call detach
-      await inspector.stop(42);
-      // Only called once for the first stop
-      expect(mockDebugger.detach).toHaveBeenCalledTimes(1);
+      expect(inspector.isAttached(42)).toBe(false);
     });
 
     it('should return tabId and deepNetwork:stopped status', async () => {
@@ -169,6 +222,43 @@ describe('DeepNetworkInspector', () => {
       await inspector.stop(99);
 
       expect(mockDebugger.detach).toHaveBeenCalledTimes(2);
+    });
+
+    it('should keep tab tracked when detach fails', async () => {
+      mockDebugger.detach.mockImplementation((target, callback) => {
+        if (callback) callback({ message: 'Detach failed' });
+      });
+
+      const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
+
+      await expect(inspector.stop(42)).rejects.toThrow('Failed to detach debugger: Detach failed');
+      expect(inspector.isAttached(42)).toBe(true);
+    });
+
+    it('should keep tab tracked when detach callback has lastError', async () => {
+      mockDebugger.detach.mockImplementation((target, callback) => {
+        if (callback) callback({ message: 'Cannot detach - debugger active' });
+      });
+
+      const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
+
+      await expect(inspector.stop(42)).rejects.toThrow('Failed to detach debugger: Cannot detach - debugger active');
+      expect(inspector.isAttached(42)).toBe(true);
+    });
+
+    it('should succeed on stop when detach succeeds', async () => {
+      const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
+
+      const result = await inspector.stop(42);
+
+      expect(result).toEqual({ tabId: 42, deepNetwork: 'stopped' });
+      expect(inspector.isAttached(42)).toBe(false);
     });
   });
 
@@ -235,11 +325,35 @@ describe('DeepNetworkInspector', () => {
         expect.any(Function)
       );
     });
+
+    it('should reject when command fails with lastError', async () => {
+      // Override sendCommand to return error only for Network.getResponseBody
+      mockDebugger.sendCommand.mockImplementation(
+        (_target, method, _params, callback) => {
+          if (method === 'Network.getResponseBody' && callback) {
+            callback(null, { message: 'No resource with given identifier' });
+          }
+          // Default for other methods (like Network.enable)
+          else if (callback) {
+            callback({});
+          }
+        }
+      );
+
+      const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
+
+      await expect(inspector.getResponseBody(42, 'unknown-request'))
+        .rejects.toThrow('Failed to get response body: No resource with given identifier');
+    });
   });
 
   describe('handleEvent(source, method, params)', () => {
-    it('should emit event when Network.requestWillBeSent is received', () => {
+    it('should emit event when Network.requestWillBeSent is received for attached tab', async () => {
       const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
 
       inspector.handleEvent({ tabId: 42 }, 'Network.requestWillBeSent', {
         requestId: 'req-1',
@@ -258,8 +372,10 @@ describe('DeepNetworkInspector', () => {
       });
     });
 
-    it('should emit event for Network.responseReceived', () => {
+    it('should emit event for Network.responseReceived', async () => {
       const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
 
       inspector.handleEvent({ tabId: 42 }, 'Network.responseReceived', {
         requestId: 'req-2',
@@ -275,8 +391,10 @@ describe('DeepNetworkInspector', () => {
       });
     });
 
-    it('should emit event for Network.dataReceived', () => {
+    it('should emit event for Network.dataReceived', async () => {
       const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
 
       inspector.handleEvent({ tabId: 42 }, 'Network.dataReceived', {
         requestId: 'req-3',
@@ -292,8 +410,10 @@ describe('DeepNetworkInspector', () => {
       });
     });
 
-    it('should emit event for Network.loadingFinished', () => {
+    it('should emit event for Network.loadingFinished', async () => {
       const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
 
       inspector.handleEvent({ tabId: 42 }, 'Network.loadingFinished', {
         requestId: 'req-4',
@@ -309,24 +429,64 @@ describe('DeepNetworkInspector', () => {
       });
     });
 
-    it('should not emit event for non-Network methods', () => {
+    it('should not emit event for non-Network methods', async () => {
       const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
 
       inspector.handleEvent({ tabId: 42 }, 'Page.loadEventFired', { timestamp: 123 });
 
       expect(capturedEvents).toHaveLength(0);
     });
 
-    it('should not emit event when source has no tabId', () => {
+    it('should not emit event when source has no tabId', async () => {
       const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
 
       inspector.handleEvent({}, 'Network.requestWillBeSent', { requestId: 'req-1' });
 
       expect(capturedEvents).toHaveLength(0);
     });
 
-    it('should handle null params', () => {
+    it('should not emit event for unattached tab', async () => {
       const inspector = new DeepNetworkInspector(emit);
+
+      // Tab 42 is NOT attached
+      inspector.handleEvent({ tabId: 42 }, 'Network.requestWillBeSent', {
+        requestId: 'req-1',
+        request: { url: 'https://example.com' },
+      });
+
+      expect(capturedEvents).toHaveLength(0);
+    });
+
+    it('should emit event only for attached tab', async () => {
+      const inspector = new DeepNetworkInspector(emit);
+
+      // Start monitoring tab 42
+      await inspector.start(42);
+
+      // Tab 42 is attached, should emit
+      inspector.handleEvent({ tabId: 42 }, 'Network.requestWillBeSent', {
+        requestId: 'req-1',
+        request: { url: 'https://example.com' },
+      });
+
+      // Tab 99 is not attached, should not emit
+      inspector.handleEvent({ tabId: 99 }, 'Network.requestWillBeSent', {
+        requestId: 'req-2',
+        request: { url: 'https://example.com/other' },
+      });
+
+      expect(capturedEvents).toHaveLength(1);
+      expect(capturedEvents[0]!.tabId).toBe(42);
+    });
+
+    it('should handle null params', async () => {
+      const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
 
       inspector.handleEvent({ tabId: 42 }, 'Network.requestWillBeSent', null);
 
@@ -339,8 +499,10 @@ describe('DeepNetworkInspector', () => {
       });
     });
 
-    it('should handle undefined params', () => {
+    it('should handle undefined params', async () => {
       const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
 
       inspector.handleEvent({ tabId: 42 }, 'Network.requestWillBeSent', undefined);
 
@@ -353,8 +515,10 @@ describe('DeepNetworkInspector', () => {
       });
     });
 
-    it('should handle params with extra properties', () => {
+    it('should handle params with extra properties', async () => {
       const inspector = new DeepNetworkInspector(emit);
+
+      await inspector.start(42);
 
       inspector.handleEvent({ tabId: 42 }, 'Network.requestWillBeSent', {
         requestId: 'req-5',
