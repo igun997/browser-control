@@ -1,67 +1,108 @@
-export type ActionType = 'navigate' | 'scroll' | 'click' | 'input' | 'screenshot' | 'evaluate';
 export type TabTarget = 'active' | number;
 
-export interface NavigatePayload {
-  url: string;
-  waitUntil?: string;
+export interface AgentRequest {
+  id: string;
+  type: 'request';
+  method: string;
+  params: Record<string, unknown>;
 }
 
-export interface ScrollPayload {
-  direction: 'up' | 'down' | 'left' | 'right';
-  amount?: number;
+export interface AgentResponse {
+  id: string;
+  type: 'response';
+  result?: unknown;
+  error?: ProtocolError;
 }
 
-export interface ClickPayload {
-  selector: string;
+export interface AgentEvent {
+  type: 'event';
+  event: string;
+  tabId?: number;
+  payload: Record<string, unknown>;
 }
 
-export interface InputPayload {
-  selector: string;
-  text: string;
+export interface ProtocolError {
+  code: string;
+  message: string;
+  details?: unknown;
 }
 
-export interface ScreenshotPayload {
-  fullPage?: boolean;
+export interface HelloMessage {
+  type: 'hello';
+  version: string;
+  permissions: string[];
+  tabs: Array<{ id: number; url?: string; title?: string; active: boolean }>;
+  token?: string;
 }
 
-export interface EvaluatePayload {
-  script: string;
+export interface HelloAckMessage {
+  type: 'hello_ack';
+  sessionId: string;
+  config?: {
+    network?: {
+      enabled?: boolean;
+      urlAllowlist?: string[];
+      urlBlocklist?: string[];
+    };
+    redactHeaders?: string[];
+    bodyLimitBytes?: number;
+  };
 }
 
-export type ActionPayload = NavigatePayload | ScrollPayload | ClickPayload | InputPayload | ScreenshotPayload | EvaluatePayload;
+export function parseAgentMessage(value: unknown): AgentRequest | HelloAckMessage {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('Invalid message format');
+  }
 
-export interface BrowserMessage {
-  action: ActionType;
-  target: TabTarget;
-  payload: ActionPayload;
+  const msg = value as Record<string, unknown>;
+
+  // Check if it's a hello_ack message
+  if (msg.type === 'hello_ack') {
+    if (typeof msg.sessionId !== 'string') {
+      throw new Error('Invalid hello_ack: missing sessionId');
+    }
+    return msg as unknown as HelloAckMessage;
+  }
+
+  // Validate request object structure
+  if (typeof msg.id !== 'string') {
+    throw new Error('Missing id');
+  }
+  if (msg.type !== 'request') {
+    throw new Error('Invalid message type');
+  }
+  if (typeof msg.method !== 'string') {
+    throw new Error('Missing method');
+  }
+  if (typeof msg.params !== 'object' || msg.params === null || Array.isArray(msg.params)) {
+    throw new Error('Invalid params');
+  }
+
+  return msg as unknown as AgentRequest;
 }
 
-const VALID_ACTION_TYPES = new Set<ActionType>([
-  'navigate',
-  'scroll',
-  'click',
-  'input',
-  'screenshot',
-  'evaluate',
-]);
-
-export function isValidActionType(action: unknown): action is ActionType {
-  return typeof action === 'string' && VALID_ACTION_TYPES.has(action as ActionType);
+export function resolveTabTarget(target: TabTarget | unknown, activeTabId: number | undefined): number {
+  if (target === 'active') {
+    if (activeTabId === undefined) {
+      throw new Error('No active tab available');
+    }
+    return activeTabId;
+  }
+  if (typeof target === 'number' && Number.isInteger(target) && target > 0) {
+    return target;
+  }
+  throw new Error('Invalid tab target');
 }
 
-export function isValidTabTarget(target: unknown): target is TabTarget {
-  if (target === 'active') return true;
-  if (typeof target === 'number' && Number.isInteger(target) && target > 0) return true;
-  return false;
-}
-
-export function isValidBrowserMessage(message: unknown): message is BrowserMessage {
-  if (typeof message !== 'object' || message === null) return false;
-  const msg = message as Record<string, unknown>;
-  
-  if (!isValidActionType(msg.action)) return false;
-  if (!isValidTabTarget(msg.target)) return false;
-  if (typeof msg.payload !== 'object' || msg.payload === null) return false;
-  
-  return true;
+export function toProtocolError(error: unknown): ProtocolError {
+  if (typeof error === 'object' && error !== null) {
+    const e = error as Record<string, unknown>;
+    if (typeof e.code === 'string' && typeof e.message === 'string') {
+      return { code: e.code, message: e.message, details: e.details };
+    }
+  }
+  if (error instanceof Error) {
+    return { code: 'INTERNAL_ERROR', message: error.message };
+  }
+  return { code: 'UNKNOWN_ERROR', message: String(error) };
 }
