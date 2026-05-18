@@ -97,16 +97,50 @@ async function initializeSocket(): Promise<void> {
 // Handle popup messages for inspect controls
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.method === 'popup:inspect:start') {
-    // Handle inspect start - this would typically start the network inspector
-    console.log('Popup: inspect start requested');
-    sendResponse({ ok: true });
+    if (!commandRouter) {
+      sendResponse({ ok: false, error: 'ROUTER_UNAVAILABLE' });
+      return true;
+    }
+
+    void commandRouter
+      .handle({
+        id: 'popup',
+        type: 'request',
+        method: 'inspect:start',
+        params: { tabId: 'active' },
+      })
+      .then((result) => {
+        sendResponse({ ok: true, result });
+      })
+      .catch((err) => {
+        const error = err instanceof Error ? err.message : String(err);
+        sendResponse({ ok: false, error });
+      });
+
     return true;
   }
 
   if (message.method === 'popup:inspect:stop') {
-    // Handle inspect stop
-    console.log('Popup: inspect stop requested');
-    sendResponse({ ok: true });
+    if (!commandRouter) {
+      sendResponse({ ok: false, error: 'ROUTER_UNAVAILABLE' });
+      return true;
+    }
+
+    void commandRouter
+      .handle({
+        id: 'popup',
+        type: 'request',
+        method: 'inspect:stop',
+        params: { tabId: 'active' },
+      })
+      .then((result) => {
+        sendResponse({ ok: true, result });
+      })
+      .catch((err) => {
+        const error = err instanceof Error ? err.message : String(err);
+        sendResponse({ ok: false, error });
+      });
+
     return true;
   }
 
