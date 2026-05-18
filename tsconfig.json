@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "types": ["chrome", "vitest/globals", "node"],
+    "lib": ["ES2022", "ES2023", "DOM"]
+  },
+  "include": ["extension/src", "vitest.config.ts"],
+  "exclude": ["extension/vite.config.ts"]
+}

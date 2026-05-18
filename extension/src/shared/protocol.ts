@@ -1,0 +1,1 @@
+export type TabTarget = 'active' | number;

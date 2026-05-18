@@ -1,0 +1,22 @@
+{
+  "name": "browser-controls",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build --config extension/vite.config.ts && npm run copy-assets",
+    "copy-assets": "copyfiles -u 1 extension/manifest.json dist/ && copyfiles dist/src/popup/index.html dist/popup.html && rm -rf dist/src"
+  },
+  "devDependencies": {
+    "@types/chrome": "latest",
+    "@types/node": "latest",
+    "copyfiles": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "vitest": "latest",
+    "jsdom": "latest"
+  }
+}
