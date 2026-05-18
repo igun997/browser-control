@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AgentSocket, WebSocketFactory } from './wsClient.js';
+import { AgentSocket, WebSocketFactory, SocketOptions } from './wsClient.js';
 
 // Create a fresh mock WebSocket for each test
 function createMockWs() {
@@ -61,34 +61,58 @@ describe('AgentSocket', () => {
     vi.restoreAllMocks();
   });
 
-  // Helper to wait for the AgentSocket constructor to complete
-  async function waitForConnection(): Promise<void> {
-    await new Promise(resolve => setTimeout(resolve, 0));
-  }
-
-  describe('connection', () => {
-    it('should create WebSocket with provided URL', async () => {
+  describe('constructor', () => {
+    it('should not start connection in constructor', () => {
       const mockWs = createMockWs();
       const factory: WebSocketFactory = {
         create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
       };
       
-      new AgentSocket('ws://localhost:9000', undefined, factory);
-      await waitForConnection();
+      new AgentSocket({ url: 'ws://localhost:9000', wsFactory: factory });
       
-      expect(factory.create).toHaveBeenCalledWith('ws://localhost:9000');
+      // Factory should not be called yet
+      expect(factory.create).not.toHaveBeenCalled();
     });
 
     it('should use default localhost:8765 URL when no URL provided', async () => {
+      const factory: WebSocketFactory = {
+        create: vi.fn().mockReturnValue(createMockWs()),
+      };
+      
+      const socket = new AgentSocket({ wsFactory: factory });
+      await socket.connect();
+      
+      expect(factory.create).toHaveBeenCalledWith('ws://localhost:8765');
+    });
+
+    it('should accept options object with url and token', async () => {
       const mockWs = createMockWs();
       const factory: WebSocketFactory = {
         create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
       };
       
-      new AgentSocket(undefined, undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({
+        url: 'ws://localhost:9000',
+        token: 'test-token',
+        wsFactory: factory,
+      });
+      await socket.connect();
       
-      expect(factory.create).toHaveBeenCalledWith('ws://localhost:8765');
+      expect(factory.create).toHaveBeenCalledWith('ws://localhost:9000');
+    });
+  });
+
+  describe('connect()', () => {
+    it('should create WebSocket with provided URL on connect', async () => {
+      const mockWs = createMockWs();
+      const factory: WebSocketFactory = {
+        create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
+      };
+      
+      const socket = new AgentSocket({ url: 'ws://localhost:9000', wsFactory: factory });
+      await socket.connect();
+      
+      expect(factory.create).toHaveBeenCalledWith('ws://localhost:9000');
     });
 
     it('should fire onOpen callback when connection opens', async () => {
@@ -98,14 +122,28 @@ describe('AgentSocket', () => {
       };
       const onOpen = vi.fn();
       
-      const socket = new AgentSocket('ws://localhost:8765', undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
       socket.onOpen(onOpen);
+      await socket.connect();
 
       // Simulate the WebSocket opening
       mockWs._simulateOpen();
 
       expect(onOpen).toHaveBeenCalled();
+    });
+
+    it('should be idempotent - multiple connects should not create multiple sockets', async () => {
+      const mockWs = createMockWs();
+      const factory: WebSocketFactory = {
+        create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
+      };
+      
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
+      await socket.connect();
+      await socket.connect();
+      
+      expect(factory.create).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -116,8 +154,8 @@ describe('AgentSocket', () => {
         create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
       };
       
-      new AgentSocket('ws://localhost:8765', undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
 
       // Trigger connection open
       mockWs._simulateOpen();
@@ -140,13 +178,74 @@ describe('AgentSocket', () => {
         create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
       };
       
-      new AgentSocket('ws://localhost:8765', 'my-secret-token', factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', token: 'my-secret-token', wsFactory: factory });
+      await socket.connect();
 
       mockWs._simulateOpen();
 
       const helloMessage = JSON.parse(mockWs.sentData[0]!);
       expect(helloMessage.token).toBe('my-secret-token');
+    });
+
+    it('should filter out tabs with undefined id', async () => {
+      // Override the mock for this specific test
+      (chrome.tabs.query as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: 1, url: 'https://example.com', title: 'Example', active: true },
+        { id: undefined, url: 'https://undefined-id.com', title: 'No ID', active: false },
+        { id: 2, url: 'https://test.com', title: 'Test', active: false },
+        { id: undefined, url: 'https://another-undefined.com', title: 'Also No ID', active: true },
+      ]);
+
+      const mockWs = createMockWs();
+      const factory: WebSocketFactory = {
+        create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
+      };
+      
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
+
+      mockWs._simulateOpen();
+
+      const helloMessage = JSON.parse(mockWs.sentData[0]!);
+      expect(helloMessage.tabs).toEqual([
+        { id: 1, url: 'https://example.com', title: 'Example', active: true },
+        { id: 2, url: 'https://test.com', title: 'Test', active: false },
+      ]);
+      expect(helloMessage.tabs.length).toBe(2);
+    });
+
+    it('should report error via onError when hello fails to send', async () => {
+      // Create mock closures for the setters
+      let _onopen: ((event: Event) => void) | null = null;
+      
+      // Create a mock WS that immediately closes
+      const mockWs = {
+        get readyState() { return WebSocket.CLOSED; },
+        get url() { return 'ws://localhost:8765'; },
+        set onopen(fn: ((event: Event) => void) | null) { _onopen = fn; },
+        set onclose(_: ((event: CloseEvent) => void) | null) { },
+        set onmessage(_: ((event: MessageEvent) => void) | null) { },
+        set onerror(_: ((event: Event) => void) | null) { },
+        sentData: [] as string[],
+        send(_: string) { /* no-op to simulate send failure */ },
+        close() { },
+        _simulateOpen() { _onopen?.(new Event('open')); },
+      };
+      const factory: WebSocketFactory = {
+        create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
+      };
+      const onError = vi.fn();
+      
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      socket.onError(onError);
+      await socket.connect();
+
+      // Trigger connection open - hello will fail to send because state is CLOSED
+      mockWs._simulateOpen();
+
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+        message: 'Failed to send hello message',
+      }));
     });
   });
 
@@ -158,8 +257,8 @@ describe('AgentSocket', () => {
       };
       const handler = vi.fn();
       
-      const socket = new AgentSocket('ws://localhost:8765', undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
       socket.onRequest(handler);
 
       mockWs._simulateOpen();
@@ -181,8 +280,8 @@ describe('AgentSocket', () => {
       };
       const handler = vi.fn().mockResolvedValue({ success: true });
       
-      const socket = new AgentSocket('ws://localhost:8765', undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
       socket.onRequest(handler);
 
       mockWs._simulateOpen();
@@ -212,8 +311,8 @@ describe('AgentSocket', () => {
       };
       const handler = vi.fn().mockResolvedValue({ success: true });
       
-      const socket = new AgentSocket('ws://localhost:8765', undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
       socket.onRequest(handler);
 
       mockWs._simulateOpen();
@@ -242,8 +341,8 @@ describe('AgentSocket', () => {
       };
       const handler = vi.fn().mockRejectedValue(new Error('Test error'));
       
-      const socket = new AgentSocket('ws://localhost:8765', undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
       socket.onRequest(handler);
 
       mockWs._simulateOpen();
@@ -272,8 +371,8 @@ describe('AgentSocket', () => {
       };
       const handler = vi.fn().mockRejectedValue('string error');
       
-      const socket = new AgentSocket('ws://localhost:8765', undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
       socket.onRequest(handler);
 
       mockWs._simulateOpen();
@@ -293,6 +392,39 @@ describe('AgentSocket', () => {
       expect(response.id).toBe('req-3');
       expect(response.error).toEqual({ code: 'UNKNOWN_ERROR', message: 'string error' });
     });
+
+    it('should send NO_REQUEST_HANDLER error when no handler registered', async () => {
+      const mockWs = createMockWs();
+      const factory: WebSocketFactory = {
+        create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
+      };
+      
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
+      // Note: NOT registering a handler
+
+      mockWs._simulateOpen();
+
+      // Send request message before handler is registered
+      mockWs._simulateMessage({
+        id: 'req-no-handler',
+        type: 'request',
+        method: 'testMethod',
+        params: { foo: 'bar' },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const sentMessages = mockWs.sentData.slice(1).map(d => JSON.parse(d));
+      const response = sentMessages.find(m => m.type === 'response');
+      expect(response).toBeDefined();
+      expect(response.id).toBe('req-no-handler');
+      expect(response.result).toBeUndefined();
+      expect(response.error).toEqual({
+        code: 'NO_REQUEST_HANDLER',
+        message: 'No request handler registered',
+      });
+    });
   });
 
   describe('protocol error handling', () => {
@@ -302,8 +434,8 @@ describe('AgentSocket', () => {
         create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
       };
       
-      new AgentSocket('ws://localhost:8765', undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
 
       mockWs._simulateOpen();
 
@@ -329,8 +461,8 @@ describe('AgentSocket', () => {
         create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
       };
       
-      new AgentSocket('ws://localhost:8765', undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
 
       mockWs._simulateOpen();
 
@@ -352,8 +484,8 @@ describe('AgentSocket', () => {
         create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
       };
       
-      new AgentSocket('ws://localhost:8765', undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
 
       mockWs._simulateOpen();
 
@@ -378,8 +510,8 @@ describe('AgentSocket', () => {
       };
       const onClose = vi.fn();
       
-      const socket = new AgentSocket('ws://localhost:8765', undefined, factory);
-      await waitForConnection();
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
       socket.onClose(onClose);
 
       mockWs._simulateOpen();

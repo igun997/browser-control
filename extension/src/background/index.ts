@@ -23,5 +23,8 @@ agentSocket.onError((error) => {
   console.error('WebSocket error:', error);
 });
 
+// Establish the WebSocket connection
+void agentSocket.connect();
+
 // Export for use by other modules
 export { agentSocket, getAgentSocket, AgentSocket };

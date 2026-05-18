@@ -6,6 +6,12 @@ export interface WebSocketFactory {
   create(url: string): WebSocket;
 }
 
+export interface SocketOptions {
+  url?: string;
+  token?: string;
+  wsFactory?: WebSocketFactory;
+}
+
 export class AgentSocket {
   private ws: WebSocket | null = null;
   private requestHandler: RequestHandler | null = null;
@@ -13,34 +19,45 @@ export class AgentSocket {
   private onCloseCallbacks: Array<() => void> = [];
   private onErrorCallbacks: Array<(error: Error) => void> = [];
   private wsFactory: WebSocketFactory;
+  private url!: string;
+  private token?: string;
 
   /**
-   * @param url - WebSocket URL to connect to (default: ws://localhost:8765)
-   * @param token - Optional authentication token
-   * @param wsFactory - Optional WebSocket factory for testing (defaults to global WebSocket)
+   * @param options - Socket configuration options
+   * @param options.url - WebSocket URL (default: ws://localhost:8765)
+   * @param options.token - Optional authentication token
+   * @param options.wsFactory - Optional WebSocket factory for testing
    */
-  constructor(
-    url: string | undefined,
-    token?: string,
-    wsFactory?: WebSocketFactory,
-  ) {
-    this.wsFactory = wsFactory ?? {
+  constructor(options: SocketOptions = {}) {
+    // With exactOptionalPropertyTypes, we need to handle undefined explicitly
+    const _url: string = options.url !== undefined ? options.url : 'ws://localhost:8765';
+    this.url = _url;
+    if (options.token !== undefined) { this.token = options.token; }
+    this.wsFactory = options.wsFactory ?? {
       create: (url: string) => new WebSocket(url),
     };
-    this.connect(url ?? 'ws://localhost:8765', token);
   }
 
-  private async connect(url: string, token?: string): Promise<void> {
-    // Get manifest version and tabs, then establish WebSocket connection
+  /**
+   * Establish WebSocket connection. Fetches manifest version and tabs, then sends hello.
+   * No-op if already connected.
+   */
+  async connect(): Promise<void> {
+    if (this.ws && this.ws.readyState !== WebSocket.CLOSED && this.ws.readyState !== WebSocket.CLOSING) {
+      return; // Already connected or connecting
+    }
+
     const [version, tabs] = await Promise.all([
       this.getManifestVersion(),
       this.getTabs(),
     ]);
 
-    this.ws = this.wsFactory.create(url);
+    this.ws = this.wsFactory.create(this.url);
 
     this.ws.onopen = () => {
-      this.sendHello(version, tabs, token);
+      if (!this.sendHello(version, tabs, this.token)) {
+        this.onErrorCallbacks.forEach(cb => cb(new Error('Failed to send hello message')));
+      }
       this.onOpenCallbacks.forEach(cb => cb());
     };
 
@@ -64,22 +81,27 @@ export class AgentSocket {
 
   private async getTabs(): Promise<Array<{ id: number; url?: string; title?: string; active: boolean }>> {
     const tabs = await chrome.tabs.query({});
-    return tabs.map(tab => {
-      const result: { id: number; url?: string; title?: string; active: boolean } = {
-        id: tab.id ?? 0,
-        active: tab.active,
-      };
-      if (tab.url !== undefined) {
-        result.url = tab.url;
-      }
-      if (tab.title !== undefined) {
-        result.title = tab.title;
-      }
-      return result;
-    });
+    return tabs
+      .filter(tab => tab.id !== undefined)
+      .map(tab => {
+        const result: { id: number; url?: string; title?: string; active: boolean } = {
+          id: tab.id!,
+          active: tab.active,
+        };
+        if (tab.url !== undefined) {
+          result.url = tab.url;
+        }
+        if (tab.title !== undefined) {
+          result.title = tab.title;
+        }
+        return result;
+      });
   }
 
-  private sendHello(version: string, tabs: Array<{ id: number; url?: string; title?: string; active: boolean }>, token?: string): void {
+  /**
+   * Send hello message. Returns false if socket is not open.
+   */
+  private sendHello(version: string, tabs: Array<{ id: number; url?: string; title?: string; active: boolean }>, token?: string): boolean {
     const hello: {
       type: 'hello';
       version: string;
@@ -95,7 +117,7 @@ export class AgentSocket {
     if (token) {
       hello.token = token;
     }
-    this.send(hello);
+    return this.send(hello);
   }
 
   private handleMessage(data: string): void {
@@ -117,7 +139,17 @@ export class AgentSocket {
       }
 
       // Handle request messages
-      if (message.type === 'request' && this.requestHandler) {
+      if (message.type === 'request') {
+        if (!this.requestHandler) {
+          // Send error if no handler registered
+          this.sendResponse(message.id, {
+            error: {
+              code: 'NO_REQUEST_HANDLER',
+              message: 'No request handler registered',
+            },
+          });
+          return;
+        }
         this.dispatchRequest(message as AgentRequest);
       }
     } catch (err) {
@@ -144,7 +176,9 @@ export class AgentSocket {
       type: 'response',
       ...payload,
     };
-    this.send(response);
+    if (!this.send(response)) {
+      this.onErrorCallbacks.forEach(cb => cb(new Error('Failed to send response')));
+    }
   }
 
   private sendProtocolError(request: { id: string; type: string }, message: string): void {
@@ -156,10 +190,15 @@ export class AgentSocket {
     });
   }
 
-  private send(data: unknown): void {
+  /**
+   * Send data over WebSocket. Returns false if socket is not open.
+   */
+  private send(data: unknown): boolean {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
+      return true;
     }
+    return false;
   }
 
   onOpen(callback: () => void): void {
@@ -191,12 +230,12 @@ let agentSocket: AgentSocket | null = null;
 
 export function getAgentSocket(): AgentSocket {
   if (!agentSocket) {
-    agentSocket = new AgentSocket('ws://localhost:8765');
+    agentSocket = new AgentSocket({ url: 'ws://localhost:8765' });
   }
   return agentSocket;
 }
 
-export function createAgentSocket(url?: string, token?: string): AgentSocket {
-  agentSocket = new AgentSocket(url, token);
+export function createAgentSocket(options: SocketOptions = {}): AgentSocket {
+  agentSocket = new AgentSocket(options);
   return agentSocket;
 }
