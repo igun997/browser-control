@@ -17,7 +17,8 @@ export interface AgentResponse {
 export interface AgentEvent {
   type: 'event';
   event: string;
-  tabId?: number;
+  tabId?: number | undefined;
+  windowId?: number | undefined;
   payload: Record<string, unknown>;
 }
 

@@ -2,6 +2,8 @@ import { createAgentSocket, getAgentSocket, AgentSocket } from './wsClient.js';
 import { CommandRouter } from './commandRouter.js';
 import { NetworkInspector } from './networkInspector.js';
 import { DeepNetworkInspector } from './deepNetworkInspector.js';
+import { ActivityEvents } from './activityEvents.js';
+import type { AgentEvent } from '../shared/protocol.js';
 import type { SocketOptions } from './wsClient.js';
 
 // Module-level state for exported instances
@@ -9,6 +11,7 @@ let agentSocket: AgentSocket | null = null;
 let commandRouter: CommandRouter | null = null;
 let networkInspector: NetworkInspector | null = null;
 let deepNetworkInspector: DeepNetworkInspector | null = null;
+let activityEvents: ActivityEvents | null = null;
 
 // Load configuration from storage
 async function loadConfig(): Promise<{ wsUrl: string; token?: string }> {
@@ -56,6 +59,11 @@ async function initializeSocket(): Promise<void> {
     agentSocket!.sendEvent(event, payload);
   });
 
+  // Create activity events and hook it up to emit to the agent socket
+  activityEvents = new ActivityEvents((event: AgentEvent) => {
+    agentSocket!.sendEvent(event.event, { ...event.payload, tabId: event.tabId });
+  });
+
   // Register request handler that routes to command router
   agentSocket.onRequest(async (request) => {
     return commandRouter!.handle(request);
@@ -66,6 +74,8 @@ async function initializeSocket(): Promise<void> {
     console.log('Connected to agent WebSocket');
     // Attach network inspector to start monitoring requests
     networkInspector!.attach();
+    // Attach activity events to start listening for tab/activity events
+    activityEvents!.attach();
   });
 
   agentSocket.onClose(() => {
@@ -154,6 +164,7 @@ export {
   commandRouter,
   networkInspector,
   deepNetworkInspector,
+  activityEvents,
 };
 
 // Initialize on startup
