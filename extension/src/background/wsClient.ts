@@ -1,4 +1,4 @@
-import { parseAgentMessage, toProtocolError, AgentRequest, AgentResponse, ProtocolError } from '../shared/protocol.js';
+import { parseAgentMessage, toProtocolError, AgentRequest, AgentResponse, ProtocolError, AgentEvent } from '../shared/protocol.js';
 
 export type RequestHandler = (request: AgentRequest) => Promise<unknown> | unknown;
 
@@ -199,6 +199,20 @@ export class AgentSocket {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Send an event to the connected agent.
+   * @param event - Event name (e.g., 'network:request')
+   * @param payload - Event payload data
+   */
+  sendEvent(event: string, payload: Record<string, unknown>): boolean {
+    const eventMessage: AgentEvent = {
+      type: 'event',
+      event,
+      payload,
+    };
+    return this.send(eventMessage);
   }
 
   onOpen(callback: () => void): void {
