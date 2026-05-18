@@ -1,8 +1,94 @@
 <!doctype html>
 <html>
-  <head><title>Browser Controls Agent</title></head>
+  <head>
+    <meta charset="utf-8">
+    <title>Browser Controls Agent</title>
+    <style>
+      body {
+        min-width: 300px;
+        font-family: system-ui, -apple-system, sans-serif;
+        padding: 16px;
+        margin: 0;
+      }
+      .field {
+        margin-bottom: 12px;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        margin-bottom: 4px;
+        color: #666;
+      }
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 14px;
+      }
+      button {
+        padding: 6px 12px;
+        border: none;
+        border-radius: 4px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      #save {
+        background: #4CAF50;
+        color: white;
+        width: 100%;
+      }
+      #save:hover {
+        background: #45a049;
+      }
+      .inspect-buttons {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #inspect-start {
+        flex: 1;
+        background: #2196F3;
+        color: white;
+      }
+      #inspect-start:hover {
+        background: #1976D2;
+      }
+      #inspect-stop {
+        flex: 1;
+        background: #f44336;
+        color: white;
+      }
+      #inspect-stop:hover {
+        background: #d32f2f;
+      }
+      #status {
+        margin-top: 12px;
+        padding: 8px;
+        font-size: 12px;
+        color: #666;
+        text-align: center;
+      }
+    </style>
+  </head>
   <body>
-    <main id="app">Browser Controls Agent</main>
+    <main id="app">
+      <div class="field">
+        <label for="ws-url">WebSocket URL</label>
+        <input id="ws-url" type="text" placeholder="ws://localhost:8765" />
+      </div>
+      <div class="field">
+        <label for="token">Token (optional)</label>
+        <input id="token" type="text" placeholder="Authentication token" />
+      </div>
+      <button id="save">Save Configuration</button>
+      <div class="inspect-buttons">
+        <button id="inspect-start">Start Inspect</button>
+        <button id="inspect-stop">Stop Inspect</button>
+      </div>
+      <div id="status"></div>
+    </main>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>
