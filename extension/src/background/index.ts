@@ -48,7 +48,7 @@ async function initializeSocket(): Promise<void> {
 
   // Create deep network inspector and hook it up to emit events via the socket
   deepNetworkInspector = new DeepNetworkInspector((event) => {
-    agentSocket!.sendEvent(event.event, { ...event.payload, tabId: event.tabId });
+    agentSocket!.sendEvent(event.event, event.payload, event.tabId);
   });
 
   // Wire up deep network inspector to command router
@@ -61,7 +61,7 @@ async function initializeSocket(): Promise<void> {
 
   // Create activity events and hook it up to emit to the agent socket
   activityEvents = new ActivityEvents((event: AgentEvent) => {
-    agentSocket!.sendEvent(event.event, { ...event.payload, tabId: event.tabId });
+    agentSocket!.sendEvent(event.event, event.payload, event.tabId);
   });
 
   // Register request handler that routes to command router

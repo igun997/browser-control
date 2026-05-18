@@ -186,7 +186,7 @@ describe('ActivityEvents', () => {
   });
 
   describe('onTabActivated', () => {
-    it('should emit tab:activated event with tabId and windowId', () => {
+    it('should emit tab:activated event with tabId at top-level', () => {
       const activeInfo: chrome.tabs.OnActivatedInfo = {
         tabId: 42,
         windowId: 1,
@@ -198,15 +198,13 @@ describe('ActivityEvents', () => {
         type: 'event',
         event: 'tab:activated',
         tabId: 42,
-        windowId: 1,
         payload: {
-          tabId: 42,
           windowId: 1,
         },
       } satisfies AgentEvent);
     });
 
-    it('should pass windowId in both outer context and payload', () => {
+    it('should include windowId only in payload, not at top-level', () => {
       const activeInfo: chrome.tabs.OnActivatedInfo = {
         tabId: 99,
         windowId: 5,
@@ -216,7 +214,7 @@ describe('ActivityEvents', () => {
 
       const emittedEvent = emitSpy.mock.calls[0]?.[0] as AgentEvent;
       expect(emittedEvent.tabId).toBe(99);
-      expect(emittedEvent.windowId).toBe(5);
+      expect(emittedEvent.windowId).toBeUndefined(); // windowId should NOT be at top-level
       expect(emittedEvent.payload.windowId).toBe(5);
     });
   });
@@ -367,9 +365,7 @@ describe('ActivityEvents', () => {
         type: 'event',
         event: 'tab:activated',
         tabId: 99,
-        windowId: 3,
         payload: {
-          tabId: 99,
           windowId: 3,
         },
       } satisfies AgentEvent);

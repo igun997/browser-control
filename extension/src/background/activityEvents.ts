@@ -47,15 +47,15 @@ export class ActivityEvents {
 
   /**
    * Handle tab activation events (user switches to a different tab)
+   * Note: windowId is included in payload only, not at top-level,
+   * to avoid redundancy since the protocol primarily uses tabId.
    */
   onTabActivated(activeInfo: chrome.tabs.OnActivatedInfo): void {
     this.emit({
       type: 'event',
       event: 'tab:activated',
       tabId: activeInfo.tabId,
-      windowId: activeInfo.windowId,
       payload: {
-        tabId: activeInfo.tabId,
         windowId: activeInfo.windowId,
       },
     });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AgentSocket, WebSocketFactory, SocketOptions } from './wsClient.js';
+import { AgentSocket, WebSocketFactory } from './wsClient.js';
 
 // Create a fresh mock WebSocket for each test
 function createMockWs() {
@@ -35,6 +35,24 @@ function createMockWs() {
     _simulateClose() {
       _onclose?.(new CloseEvent('close', { code: 1000 }));
     },
+  };
+}
+
+// Create a mock WebSocket that starts in CLOSED state
+function createClosedMockWs() {
+  let _onopen: ((event: Event) => void) | null = null;
+
+  return {
+    get readyState() { return WebSocket.CLOSED; },
+    get url() { return 'ws://localhost:8765'; },
+    set onopen(fn: ((event: Event) => void) | null) { _onopen = fn; },
+    set onclose(_: ((event: CloseEvent) => void) | null) { },
+    set onmessage(_: ((event: MessageEvent) => void) | null) { },
+    set onerror(_: ((event: Event) => void) | null) { },
+    sentData: [] as string[],
+    send(_: string) { /* no-op to simulate send failure */ },
+    close() { },
+    _simulateOpen() { _onopen?.(new Event('open')); },
   };
 }
 
@@ -215,22 +233,7 @@ describe('AgentSocket', () => {
     });
 
     it('should report error via onError when hello fails to send', async () => {
-      // Create mock closures for the setters
-      let _onopen: ((event: Event) => void) | null = null;
-      
-      // Create a mock WS that immediately closes
-      const mockWs = {
-        get readyState() { return WebSocket.CLOSED; },
-        get url() { return 'ws://localhost:8765'; },
-        set onopen(fn: ((event: Event) => void) | null) { _onopen = fn; },
-        set onclose(_: ((event: CloseEvent) => void) | null) { },
-        set onmessage(_: ((event: MessageEvent) => void) | null) { },
-        set onerror(_: ((event: Event) => void) | null) { },
-        sentData: [] as string[],
-        send(_: string) { /* no-op to simulate send failure */ },
-        close() { },
-        _simulateOpen() { _onopen?.(new Event('open')); },
-      };
+      const mockWs = createClosedMockWs();
       const factory: WebSocketFactory = {
         create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
       };
@@ -499,6 +502,96 @@ describe('AgentSocket', () => {
       expect(response.error).toBeDefined();
       expect(response.error.code).toBe('PROTOCOL_ERROR');
       expect(response.error.message).toBe('Invalid JSON format');
+    });
+  });
+
+  describe('sendEvent', () => {
+    it('should send event with top-level tabId when provided', async () => {
+      const mockWs = createMockWs();
+      const factory: WebSocketFactory = {
+        create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
+      };
+      
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
+      mockWs._simulateOpen();
+
+      const payload = { url: 'https://example.com', status: 'loading' };
+      socket.sendEvent('tab:updated', payload, 123);
+
+      expect(mockWs.sentData.length).toBe(2); // hello + event
+      const sentMessage = JSON.parse(mockWs.sentData[1]!);
+      expect(sentMessage.type).toBe('event');
+      expect(sentMessage.event).toBe('tab:updated');
+      expect(sentMessage.tabId).toBe(123);
+      expect(sentMessage.payload).toEqual(payload);
+    });
+
+    it('should send event without top-level tabId when not provided', async () => {
+      const mockWs = createMockWs();
+      const factory: WebSocketFactory = {
+        create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
+      };
+      
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
+      mockWs._simulateOpen();
+
+      const payload = { url: 'https://example.com' };
+      socket.sendEvent('tab:updated', payload);
+
+      expect(mockWs.sentData.length).toBe(2);
+      const sentMessage = JSON.parse(mockWs.sentData[1]!);
+      expect(sentMessage.type).toBe('event');
+      expect(sentMessage.event).toBe('tab:updated');
+      expect(sentMessage.tabId).toBeUndefined();
+      expect(sentMessage.payload).toEqual(payload);
+    });
+
+    it('should send event without top-level tabId when tabId is undefined', async () => {
+      const mockWs = createMockWs();
+      const factory: WebSocketFactory = {
+        create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
+      };
+      
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
+      mockWs._simulateOpen();
+
+      const payload = { someData: true };
+      socket.sendEvent('some:event', payload, undefined);
+
+      expect(mockWs.sentData.length).toBe(2);
+      const sentMessage = JSON.parse(mockWs.sentData[1]!);
+      expect(sentMessage.type).toBe('event');
+      expect(sentMessage.tabId).toBeUndefined();
+    });
+
+    it('should return true on successful send', async () => {
+      const mockWs = createMockWs();
+      const factory: WebSocketFactory = {
+        create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
+      };
+      
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      await socket.connect();
+      mockWs._simulateOpen();
+
+      const result = socket.sendEvent('test:event', { data: 'test' }, 42);
+      expect(result).toBe(true);
+    });
+
+    it('should return false when socket is not connected', async () => {
+      const mockWs = createClosedMockWs();
+      const factory: WebSocketFactory = {
+        create: vi.fn().mockReturnValue(mockWs as unknown as WebSocket),
+      };
+      
+      const socket = new AgentSocket({ url: 'ws://localhost:8765', wsFactory: factory });
+      // Note: NOT connecting
+
+      const result = socket.sendEvent('test:event', { data: 'test' });
+      expect(result).toBe(false);
     });
   });
 

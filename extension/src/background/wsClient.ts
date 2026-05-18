@@ -205,13 +205,17 @@ export class AgentSocket {
    * Send an event to the connected agent.
    * @param event - Event name (e.g., 'network:request')
    * @param payload - Event payload data
+   * @param tabId - Optional tab ID to include at top-level of the event envelope
    */
-  sendEvent(event: string, payload: Record<string, unknown>): boolean {
+  sendEvent(event: string, payload: Record<string, unknown>, tabId?: number): boolean {
     const eventMessage: AgentEvent = {
       type: 'event',
       event,
       payload,
     };
+    if (tabId !== undefined) {
+      eventMessage.tabId = tabId;
+    }
     return this.send(eventMessage);
   }
 
