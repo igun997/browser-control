@@ -7,17 +7,31 @@ A Chrome extension that exposes browser automation commands via WebSocket, enabl
 | Command | Description | Parameters |
 |---------|-------------|------------|
 | `navigate` | Navigate to a URL | `url` (string, required), `tabId` (number or 'active', optional) |
-| `inspect` | Get element info at coordinates | `xpath` (string), `tabId` (optional) |
+| `inspect` | Get element info at coordinates | `selector` (string), `tabId` (optional) |
 | `inspect:start` | Start DOM inspection mode | `tabId` (optional) |
 | `inspect:stop` | Stop DOM inspection mode | `tabId` (optional) |
 | `query DOM` | Query DOM elements using CSS selector or XPath | `selector` (string, required), `tabId` (optional) |
 | `click` | Click an element | `selector` (string, required), `tabId` (optional) |
 | `type` | Type text into an element | `selector` (string, required), `text` (string, required), `tabId` (optional) |
-| `scroll` | Scroll an element into view | `selector` (string, optional), `direction` ('up'/'down', optional), `tabId` (optional) |
+| `scroll` | Scroll an element into view | `x` (number, optional), `y` (number, optional), `selector` (string, optional), `tabId` (optional) |
 | `screenshot` | Capture visible tab screenshot | Returns data URL |
 | `network:deep:start` | Start deep network monitoring | `tabId` (optional) |
 | `network:getResponseBody` | Get response body for a request | `requestId` (string, required), `tabId` (optional) |
 | `network:deep:stop` | Stop deep network monitoring | `tabId` (optional) |
+
+## Events
+
+The extension emits the following events via WebSocket:
+
+- `tab:updated` - Tab content was updated
+- `tab:activated` - Tab was activated/focused
+- `inspect:hover` - Element hovered during inspection
+- `inspect:select` - Element selected during inspection
+- `network:request` - Network request initiated
+- `network:response` - Network response received
+- `network:complete` - Network request completed
+- `network:error` - Network request error
+- `cdp:Network.*` - Deep mode CDP network events
 
 ## Protocol
 
@@ -59,8 +73,23 @@ Communication uses JSON messages over WebSocket.
 
 ### Handshake
 
-1. Agent sends `hello` message with version and permissions
-2. Extension responds with `hello_ack` containing session ID
+1. Agent sends `hello` message with version and permissions:
+```json
+{
+  "type": "hello",
+  "version": "1.0",
+  "permissions": ["tabs", "network", "inspect"]
+}
+```
+
+2. Extension responds with `hello_ack` containing session ID:
+```json
+{
+  "type": "hello_ack",
+  "sessionId": "unique-session-id",
+  "version": "1.0"
+}
+```
 
 ## Development
 
