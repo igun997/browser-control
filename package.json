@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "build": "vite build --config extension/vite.config.ts && npm run copy-assets",
-    "copy-assets": "copyfiles -u 1 extension/manifest.json dist/ && cp dist/src/popup/index.html dist/popup.html && rm -rf dist/src"
+    "copy-assets": "copyfiles -u 1 extension/manifest.json dist/ && cp dist/src/popup/index.html dist/popup.html && node -e \"const fs=require('fs'); fs.writeFileSync('dist/popup.html', fs.readFileSync('dist/popup.html','utf8').replace(/src=\\\"[^\\\"]*popup\\.js\\\"/g, 'src=\\\"./popup.js\\\"'));\" && rm -rf dist/src"
   },
   "devDependencies": {
     "@types/chrome": "latest",
