@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { makeSelector, inspectSelector, inspectElement, setupInspectHandler, findElement } from './domInspect.js';
+import { makeSelector, inspectSelector, inspectElement, setupInspectHandler, registerInspectHandler, findElement } from './domInspect.js';
 import { BrowserControlsError } from '../shared/errors.js';
 
 // Test helper to create DOM elements
@@ -443,5 +443,33 @@ describe('setupInspectHandler', () => {
         }),
       })
     );
+  });
+});
+
+describe('registerInspectHandler', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should call chrome.runtime.onMessage.addListener with the handler', () => {
+    // Mock chrome.runtime.onMessage
+    const addListenerMock = vi.fn();
+    const globalMock = {
+      chrome: {
+        runtime: {
+          onMessage: {
+            addListener: addListenerMock,
+          },
+        },
+      },
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (global as unknown as { chrome?: typeof globalMock.chrome }).chrome = globalMock.chrome;
+
+    registerInspectHandler();
+
+    expect(addListenerMock).toHaveBeenCalledTimes(1);
+    expect(typeof addListenerMock.mock.calls[0]![0]).toBe('function');
   });
 });

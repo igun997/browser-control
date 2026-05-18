@@ -1,5 +1,5 @@
-import { setupInspectHandler } from './domInspect.js';
+import { registerInspectHandler } from './domInspect.js';
 
 console.log('browser-controls content loaded');
 
-setupInspectHandler();
+registerInspectHandler();
