@@ -20,6 +20,7 @@ export function initPopup(storage: StorageArea, defaultWsUrl = 'ws://localhost:8
   const statusDiv = document.querySelector('#status') as HTMLDivElement;
   const statusDot = document.querySelector('#status-dot') as HTMLSpanElement | null;
   const statusText = document.querySelector('#status-text') as HTMLSpanElement | null;
+  const inspectStatus = document.querySelector('#inspect-status') as HTMLDivElement | null;
 
   // Query connection status from background
   if (statusDot && statusText) {
@@ -52,14 +53,42 @@ export function initPopup(storage: StorageArea, defaultWsUrl = 'ws://localhost:8
     statusDiv.textContent = 'Saved. Reload extension to reconnect.';
   });
 
+  // Helper to update inspect status indicator
+  function setInspectStatus(state: 'inspecting' | 'idle' | 'error', text: string): void {
+    if (inspectStatus) {
+      inspectStatus.textContent = text;
+      inspectStatus.className = `inspect-status ${state}`;
+    }
+    if (state === 'inspecting') {
+      inspectStartButton.classList.add('active');
+    } else {
+      inspectStartButton.classList.remove('active');
+    }
+  }
+
   // Inspect start button handler
   inspectStartButton.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ method: 'popup:inspect:start' });
+    setInspectStatus('idle', 'Starting…');
+    chrome.runtime.sendMessage({ method: 'popup:inspect:start' }, (response) => {
+      if (response?.ok) {
+        setInspectStatus('inspecting', '🔍 Inspecting — hover over elements');
+      } else {
+        const msg = response?.error || 'Failed to start inspect';
+        setInspectStatus('error', `✗ ${msg}`);
+      }
+    });
   });
 
   // Inspect stop button handler
   inspectStopButton.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ method: 'popup:inspect:stop' });
+    chrome.runtime.sendMessage({ method: 'popup:inspect:stop' }, (response) => {
+      if (response?.ok) {
+        setInspectStatus('idle', 'Inspect stopped');
+      } else {
+        const msg = response?.error || 'Failed to stop inspect';
+        setInspectStatus('error', `✗ ${msg}`);
+      }
+    });
   });
 }
 

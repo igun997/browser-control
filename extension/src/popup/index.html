@@ -55,6 +55,10 @@
       #inspect-start:hover {
         background: #1976D2;
       }
+      #inspect-start.active {
+        background: #0D47A1;
+        box-shadow: inset 0 0 0 2px #90CAF9;
+      }
       #inspect-stop {
         flex: 1;
         background: #f44336;
@@ -62,6 +66,22 @@
       }
       #inspect-stop:hover {
         background: #d32f2f;
+      }
+      .inspect-status {
+        margin-top: 6px;
+        font-size: 12px;
+        text-align: center;
+        min-height: 16px;
+      }
+      .inspect-status.inspecting {
+        color: #0D47A1;
+        font-weight: 600;
+      }
+      .inspect-status.error {
+        color: #d32f2f;
+      }
+      .inspect-status.idle {
+        color: #666;
       }
       #status {
         margin-top: 12px;
@@ -114,6 +134,7 @@
         <button id="inspect-start">Start Inspect</button>
         <button id="inspect-stop">Stop Inspect</button>
       </div>
+      <div id="inspect-status" class="inspect-status"></div>
       <div id="status"></div>
     </main>
     <script type="module" src="./main.ts"></script>

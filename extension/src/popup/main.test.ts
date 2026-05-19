@@ -59,6 +59,7 @@ describe('initPopup', () => {
       <button id="save">Save</button>
       <button id="inspect-start">Start Inspect</button>
       <button id="inspect-stop">Stop Inspect</button>
+      <div id="inspect-status" class="inspect-status"></div>
       <div id="status"></div>
     `;
 
@@ -132,34 +133,76 @@ describe('initPopup', () => {
     expect(statusDiv.textContent).toBe('Saved. Reload extension to reconnect.');
   });
 
-  it('sends popup:inspect:start message when inspect-start button is clicked', async () => {
-    initPopup(mockChrome.storage);
+  it('sends popup:inspect:start and shows inspecting status on success', async () => {
+    mockChrome.runtime.sendMessage = vi.fn((msg, callback) => {
+      if (msg.method === 'popup:inspect:start' && callback) {
+        callback({ ok: true, result: { active: true } });
+      }
+      return Promise.resolve({});
+    }) as typeof mockChrome.runtime.sendMessage;
+    vi.stubGlobal('chrome', mockChrome);
 
+    initPopup(mockChrome.storage);
     await new Promise(resolve => setTimeout(resolve, 10));
 
     const inspectStartButton = document.querySelector('#inspect-start') as HTMLButtonElement;
     inspectStartButton.click();
-
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    expect(mockChrome.runtime.sendMessage).toHaveBeenCalledWith({
-      method: 'popup:inspect:start',
-    });
+    expect(mockChrome.runtime.sendMessage).toHaveBeenCalledWith(
+      { method: 'popup:inspect:start' },
+      expect.any(Function),
+    );
+    const inspectStatusEl = document.querySelector('#inspect-status') as HTMLDivElement;
+    expect(inspectStatusEl.textContent).toContain('Inspecting');
+    expect(inspectStatusEl.classList.contains('inspecting')).toBe(true);
+    expect(inspectStartButton.classList.contains('active')).toBe(true);
   });
 
-  it('sends popup:inspect:stop message when inspect-stop button is clicked', async () => {
-    initPopup(mockChrome.storage);
+  it('shows error status when inspect:start fails', async () => {
+    mockChrome.runtime.sendMessage = vi.fn((msg, callback) => {
+      if (msg.method === 'popup:inspect:start' && callback) {
+        callback({ ok: false, error: 'ROUTER_UNAVAILABLE' });
+      }
+      return Promise.resolve({});
+    }) as typeof mockChrome.runtime.sendMessage;
+    vi.stubGlobal('chrome', mockChrome);
 
+    initPopup(mockChrome.storage);
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    const inspectStartButton = document.querySelector('#inspect-start') as HTMLButtonElement;
+    inspectStartButton.click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    const inspectStatusEl = document.querySelector('#inspect-status') as HTMLDivElement;
+    expect(inspectStatusEl.textContent).toContain('ROUTER_UNAVAILABLE');
+    expect(inspectStatusEl.classList.contains('error')).toBe(true);
+  });
+
+  it('sends popup:inspect:stop and shows stopped status on success', async () => {
+    mockChrome.runtime.sendMessage = vi.fn((msg, callback) => {
+      if (msg.method === 'popup:inspect:stop' && callback) {
+        callback({ ok: true, result: { active: false } });
+      }
+      return Promise.resolve({});
+    }) as typeof mockChrome.runtime.sendMessage;
+    vi.stubGlobal('chrome', mockChrome);
+
+    initPopup(mockChrome.storage);
     await new Promise(resolve => setTimeout(resolve, 10));
 
     const inspectStopButton = document.querySelector('#inspect-stop') as HTMLButtonElement;
     inspectStopButton.click();
-
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    expect(mockChrome.runtime.sendMessage).toHaveBeenCalledWith({
-      method: 'popup:inspect:stop',
-    });
+    expect(mockChrome.runtime.sendMessage).toHaveBeenCalledWith(
+      { method: 'popup:inspect:stop' },
+      expect.any(Function),
+    );
+    const inspectStatusEl = document.querySelector('#inspect-status') as HTMLDivElement;
+    expect(inspectStatusEl.textContent).toContain('stopped');
+    expect(inspectStatusEl.classList.contains('idle')).toBe(true);
   });
 
   it('accepts custom storage object', () => {
