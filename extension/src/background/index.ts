@@ -7,6 +7,7 @@ import type { AgentEvent } from '../shared/protocol.js';
 import type { SocketOptions } from './wsClient.js';
 
 // Module-level state for exported instances
+let wsConnected = false;
 let agentSocket: AgentSocket | null = null;
 let commandRouter: CommandRouter | null = null;
 let networkInspector: NetworkInspector | null = null;
@@ -72,6 +73,7 @@ async function initializeSocket(): Promise<void> {
   // Log connection status
   agentSocket.onOpen(() => {
     console.log('Connected to agent WebSocket');
+    wsConnected = true;
     // Attach network inspector to start monitoring requests
     networkInspector!.attach();
     // Attach activity events to start listening for tab/activity events
@@ -80,6 +82,7 @@ async function initializeSocket(): Promise<void> {
 
   agentSocket.onClose(() => {
     console.log('Disconnected from agent WebSocket');
+    wsConnected = false;
   });
 
   agentSocket.onError((error) => {
@@ -104,8 +107,13 @@ async function initializeSocket(): Promise<void> {
   void agentSocket.connect();
 }
 
-// Handle popup messages for inspect controls
+// Handle popup messages for inspect controls and status queries
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.method === 'popup:get-status') {
+    sendResponse({ connected: wsConnected });
+    return true;
+  }
+
   if (message.method === 'popup:inspect:start') {
     if (!commandRouter) {
       sendResponse({ ok: false, error: 'ROUTER_UNAVAILABLE' });

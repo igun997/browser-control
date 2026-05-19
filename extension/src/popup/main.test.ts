@@ -52,6 +52,8 @@ describe('initPopup', () => {
 
     // Mock document elements
     document.body.innerHTML = `
+      <span id="status-dot" class="status-dot disconnected"></span>
+      <span id="status-text">Disconnected</span>
       <input id="ws-url" type="text" />
       <input id="token" type="text" />
       <button id="save">Save</button>
@@ -169,5 +171,38 @@ describe('initPopup', () => {
     initPopup({ sync: customStorage } as unknown as StorageArea);
 
     expect(customStorage.get).toHaveBeenCalled();
+  });
+
+  it('shows connected status when background reports connected', async () => {
+    mockChrome.runtime.sendMessage = vi.fn((_msg, callback) => {
+      if (callback) callback({ connected: true });
+      return Promise.resolve({});
+    }) as typeof mockChrome.runtime.sendMessage;
+    vi.stubGlobal('chrome', mockChrome);
+
+    initPopup(mockChrome.storage);
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    const dot = document.querySelector('#status-dot') as HTMLSpanElement;
+    const text = document.querySelector('#status-text') as HTMLSpanElement;
+    expect(dot.classList.contains('connected')).toBe(true);
+    expect(dot.classList.contains('disconnected')).toBe(false);
+    expect(text.textContent).toBe('Connected');
+  });
+
+  it('shows disconnected status when background reports disconnected', async () => {
+    mockChrome.runtime.sendMessage = vi.fn((_msg, callback) => {
+      if (callback) callback({ connected: false });
+      return Promise.resolve({});
+    }) as typeof mockChrome.runtime.sendMessage;
+    vi.stubGlobal('chrome', mockChrome);
+
+    initPopup(mockChrome.storage);
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    const dot = document.querySelector('#status-dot') as HTMLSpanElement;
+    const text = document.querySelector('#status-text') as HTMLSpanElement;
+    expect(dot.classList.contains('disconnected')).toBe(true);
+    expect(text.textContent).toBe('Disconnected');
   });
 });

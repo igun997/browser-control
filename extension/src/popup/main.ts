@@ -18,6 +18,23 @@ export function initPopup(storage: StorageArea, defaultWsUrl = 'ws://localhost:8
   const inspectStartButton = document.querySelector('#inspect-start') as HTMLButtonElement;
   const inspectStopButton = document.querySelector('#inspect-stop') as HTMLButtonElement;
   const statusDiv = document.querySelector('#status') as HTMLDivElement;
+  const statusDot = document.querySelector('#status-dot') as HTMLSpanElement | null;
+  const statusText = document.querySelector('#status-text') as HTMLSpanElement | null;
+
+  // Query connection status from background
+  if (statusDot && statusText) {
+    chrome.runtime.sendMessage({ method: 'popup:get-status' }, (response) => {
+      if (response?.connected) {
+        statusDot.classList.remove('disconnected');
+        statusDot.classList.add('connected');
+        statusText.textContent = 'Connected';
+      } else {
+        statusDot.classList.remove('connected');
+        statusDot.classList.add('disconnected');
+        statusText.textContent = 'Disconnected';
+      }
+    });
+  }
 
   // Load saved configuration
   storage.sync.get(['wsUrl', 'token']).then((items) => {
