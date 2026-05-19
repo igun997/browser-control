@@ -9,6 +9,6 @@
     "types": ["chrome", "vitest/globals", "node"],
     "lib": ["ES2022", "ES2023", "DOM"]
   },
-  "include": ["extension/src", "vitest.config.ts"],
-  "exclude": ["extension/vite.config.ts"]
+  "include": ["extension/src", "server/src", "vitest.config.ts"],
+  "exclude": ["extension/vite.config.ts", "server/tsconfig.json"]
 }
