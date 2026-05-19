@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ExtensionServer } from './wsServer.js';
+import { ControllerClient } from './controllerClient.js';
 import { Bridge } from './bridge.js';
 import { createMcpServer } from './mcp.js';
 
@@ -47,19 +48,47 @@ export function parseArgs(
   return config;
 }
 
+async function tryConnectController(port: number, token: string | undefined, timeoutMs: number): Promise<ControllerClient | null> {
+  const client = new ControllerClient({ port, ...(token !== undefined ? { token } : {}) });
+  try {
+    await Promise.race([
+      client.connect(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Connection timeout')), timeoutMs),
+      ),
+    ]);
+    return client;
+  } catch {
+    client.close();
+    return null;
+  }
+}
+
 async function main(): Promise<void> {
   const config = parseArgs(process.argv.slice(2));
 
-  // Start WebSocket server for extension
-  const extensionServer = new ExtensionServer({
-    port: config.port,
-    ...(config.token !== undefined ? { token: config.token } : {}),
-  });
-  const actualPort = await extensionServer.start();
-  console.error(`[browser-controls] WebSocket server listening on port ${actualPort}`);
+  const controllerClient = await tryConnectController(config.port, config.token, 2000);
 
-  // Create bridge and MCP server
-  const bridge = new Bridge(extensionServer);
+  let bridge: Bridge;
+  let shutdownResources: { close(): void }[] = [];
+
+  if (controllerClient !== null) {
+    console.error(`[browser-controls] Connected to daemon on port ${config.port}`);
+    bridge = new Bridge(controllerClient);
+    shutdownResources = [controllerClient];
+  } else {
+    console.error('[browser-controls] No daemon found, starting in standalone mode');
+    const extensionServer = new ExtensionServer({
+      port: config.port,
+      ...(config.token !== undefined ? { token: config.token } : {}),
+    });
+    const actualPort = await extensionServer.start();
+    console.error(`[browser-controls] WebSocket server listening on port ${actualPort}`);
+    bridge = new Bridge(extensionServer);
+    shutdownResources = [extensionServer];
+  }
+
+  // Create MCP server
   const mcpServer = createMcpServer(bridge);
 
   // Connect MCP server to stdio transport
@@ -70,7 +99,9 @@ async function main(): Promise<void> {
   // Graceful shutdown
   const shutdown = async () => {
     console.error('[browser-controls] Shutting down...');
-    extensionServer.close();
+    for (const res of shutdownResources) {
+      res.close();
+    }
     await mcpServer.close();
     process.exit(0);
   };
