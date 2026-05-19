@@ -1,31 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Bridge, METHOD_MAP } from './bridge.js';
-import type { ExtensionServer } from './wsServer.js';
+import type { CommandSender } from './types.js';
 
-function createMockServer() {
+function createMockSender() {
   return {
     isConnected: vi.fn(() => true),
     send: vi.fn(async () => ({ ok: true })),
-  } as unknown as ExtensionServer;
+    close: vi.fn(),
+  } as unknown as CommandSender;
 }
 
 describe('Bridge', () => {
   let bridge: Bridge;
-  let mockServer: ReturnType<typeof createMockServer>;
+  let mockSender: ReturnType<typeof createMockSender>;
 
   beforeEach(() => {
-    mockServer = createMockServer();
-    bridge = new Bridge(mockServer);
+    mockSender = createMockSender();
+    bridge = new Bridge(mockSender);
   });
 
   it('maps tool name to protocol method', async () => {
     await bridge.call('network_deep_start', { tabId: 1 });
-    expect(mockServer.send).toHaveBeenCalledWith('network:deep:start', { tabId: 1 }, undefined);
+    expect(mockSender.send).toHaveBeenCalledWith('network:deep:start', { tabId: 1 }, undefined);
   });
 
   it('passes params through', async () => {
     await bridge.call('navigate', { url: 'https://example.com', tabId: 2 });
-    expect(mockServer.send).toHaveBeenCalledWith('navigate', { url: 'https://example.com', tabId: 2 }, undefined);
+    expect(mockSender.send).toHaveBeenCalledWith('navigate', { url: 'https://example.com', tabId: 2 }, undefined);
   });
 
   it('throws on unknown tool', async () => {
@@ -33,7 +34,7 @@ describe('Bridge', () => {
   });
 
   it('throws when extension not connected', async () => {
-    (mockServer.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    (mockSender.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(false);
     await expect(bridge.call('navigate', { url: 'https://x.com' })).rejects.toThrow('Extension not connected');
   });
 });

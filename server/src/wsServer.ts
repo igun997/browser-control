@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
+import type { CommandSender } from './types.js';
 
 /** Matches extension HelloMessage shape — inlined to avoid cross-package import */
 interface HelloMessage {
@@ -41,7 +42,7 @@ interface PendingEntry {
   controllerId: string;
 }
 
-export class ExtensionServer {
+export class ExtensionServer implements CommandSender {
   private wss: WebSocketServer | null = null;
   private ws: WebSocket | null = null;
   private connected = false;

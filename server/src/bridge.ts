@@ -1,4 +1,4 @@
-import type { ExtensionServer } from './wsServer.js';
+import type { CommandSender } from './types.js';
 
 /** MCP tool name → extension protocol method */
 export const METHOD_MAP: Record<string, string> = {
@@ -17,7 +17,7 @@ export const METHOD_MAP: Record<string, string> = {
 };
 
 export class Bridge {
-  constructor(private readonly server: ExtensionServer) {}
+  constructor(private readonly sender: CommandSender) {}
 
   async call(toolName: string, params: Record<string, unknown>, timeoutMs?: number): Promise<unknown> {
     const method = METHOD_MAP[toolName];
@@ -25,10 +25,10 @@ export class Bridge {
       throw new Error(`Unknown tool: ${toolName}`);
     }
 
-    if (!this.server.isConnected()) {
+    if (!this.sender.isConnected()) {
       throw new Error('Extension not connected');
     }
 
-    return this.server.send(method, params, timeoutMs);
+    return this.sender.send(method, params, timeoutMs);
   }
 }

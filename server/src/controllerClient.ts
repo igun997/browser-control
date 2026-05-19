@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
+import type { CommandSender } from './types.js';
 
 interface ControllerHelloMessage {
   type: 'controller_hello';
@@ -45,7 +46,7 @@ export interface ControllerClientOptions {
   token?: string;
 }
 
-export class ControllerClient {
+export class ControllerClient implements CommandSender {
   private ws: WebSocket | null = null;
   private readonly port: number;
   private readonly token?: string;
