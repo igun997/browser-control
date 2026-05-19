@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
+
 /** Matches extension HelloMessage shape — inlined to avoid cross-package import */
 interface HelloMessage {
   type: 'hello';
@@ -7,6 +8,22 @@ interface HelloMessage {
   permissions: string[];
   tabs: Array<{ id: number; url?: string; title?: string; active: boolean }>;
   token?: string;
+}
+
+interface ControllerHelloMessage {
+  type: 'controller_hello';
+  token?: string;
+}
+
+interface ControllerHelloAck {
+  type: 'controller_hello_ack';
+  sessionId: string;
+  extensionConnected: boolean;
+}
+
+interface ExtensionStatusNotification {
+  type: 'extension_status';
+  connected: boolean;
 }
 
 export interface ExtensionServerOptions {
@@ -17,13 +34,22 @@ export interface ExtensionServerOptions {
 type PendingResolve = (value: unknown) => void;
 type PendingReject = (reason: Error) => void;
 
+interface PendingEntry {
+  resolve: PendingResolve;
+  reject: PendingReject;
+  timer: ReturnType<typeof setTimeout>;
+  controllerId: string;
+}
+
 export class ExtensionServer {
   private wss: WebSocketServer | null = null;
   private ws: WebSocket | null = null;
   private connected = false;
   private readonly port: number;
   private readonly token?: string;
-  private readonly pending = new Map<string, { resolve: PendingResolve; reject: PendingReject; timer: ReturnType<typeof setTimeout> }>();
+  private readonly pending = new Map<string, PendingEntry>();
+  private readonly controllers = new Map<string, WebSocket>();
+  private readonly controllerRequests = new Map<string, string>(); // requestId → controllerId
 
   constructor(options: ExtensionServerOptions) {
     this.port = options.port;
@@ -61,6 +87,12 @@ export class ExtensionServer {
       clearTimeout(helloTimeout);
       try {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
+
+        if (msg.type === 'controller_hello') {
+          this.handleControllerHello(ws, msg as unknown as ControllerHelloMessage);
+          return;
+        }
+
         if (msg.type !== 'hello') {
           ws.close(4000, 'Expected hello');
           return;
@@ -90,6 +122,9 @@ export class ExtensionServer {
           sessionId: randomUUID(),
         }));
 
+        // Notify controllers that extension is connected
+        this.broadcastExtensionStatus(true);
+
         // Wire up message and close handlers
         ws.on('message', (raw) => {
           this.handleMessage(raw.toString());
@@ -100,12 +135,85 @@ export class ExtensionServer {
             this.connected = false;
             this.ws = null;
             this.rejectAllPending('Extension disconnected');
+            this.broadcastExtensionStatus(false);
           }
         });
       } catch {
         ws.close(4000, 'Invalid hello');
       }
     });
+  }
+
+  private handleControllerHello(ws: WebSocket, msg: ControllerHelloMessage): void {
+    // Validate token if configured
+    if (this.token !== undefined) {
+      if (msg.token !== this.token) {
+        ws.close(4001, 'Invalid token');
+        return;
+      }
+    }
+
+    const sessionId = randomUUID();
+    this.controllers.set(sessionId, ws);
+
+    const ack: ControllerHelloAck = {
+      type: 'controller_hello_ack',
+      sessionId,
+      extensionConnected: this.connected,
+    };
+    ws.send(JSON.stringify(ack));
+
+    ws.on('message', (raw) => {
+      this.handleControllerMessage(sessionId, raw.toString());
+    });
+
+    ws.on('close', () => {
+      this.controllers.delete(sessionId);
+      // Clean up pending requests from this controller
+      for (const [requestId, controllerId] of this.controllerRequests) {
+        if (controllerId === sessionId) {
+          const entry = this.pending.get(requestId);
+          if (entry) {
+            clearTimeout(entry.timer);
+            entry.reject(new Error('Controller disconnected'));
+            this.pending.delete(requestId);
+          }
+          this.controllerRequests.delete(requestId);
+        }
+      }
+    });
+  }
+
+  private handleControllerMessage(controllerId: string, raw: string): void {
+    let msg: Record<string, unknown>;
+    try {
+      msg = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return; // Ignore unparseable
+    }
+
+    if (msg.type === 'request' && typeof msg.id === 'string') {
+      const requestId = msg.id;
+      this.controllerRequests.set(requestId, controllerId);
+
+      if (!this.connected || !this.ws) {
+        // Send error response back to controller
+        const controller = this.controllers.get(controllerId);
+        if (controller) {
+          controller.send(JSON.stringify({
+            type: 'response',
+            id: requestId,
+            error: { code: 'EXTENSION_NOT_CONNECTED', message: 'Extension not connected' },
+          }));
+        }
+        this.controllerRequests.delete(requestId);
+        return;
+      }
+
+      // Forward request to extension
+      const forward = { ...msg };
+      this.ws.send(JSON.stringify(forward));
+    }
   }
 
   private handleMessage(raw: string): void {
@@ -116,12 +224,13 @@ export class ExtensionServer {
       return; // Ignore unparseable
     }
 
-    // Handle responses to pending requests
+    // Handle responses to pending requests (in-process send())
     if (msg.type === 'response' && typeof msg.id === 'string') {
       const entry = this.pending.get(msg.id);
       if (entry) {
         clearTimeout(entry.timer);
         this.pending.delete(msg.id);
+        this.controllerRequests.delete(msg.id);
 
         if (msg.error) {
           const err = msg.error as { code: string; message: string };
@@ -131,9 +240,36 @@ export class ExtensionServer {
         } else {
           entry.resolve(msg.result);
         }
+        return;
+      }
+
+      // Route extension response back to the controller that sent the request
+      const controllerId = this.controllerRequests.get(msg.id);
+      if (controllerId) {
+        const controller = this.controllers.get(controllerId);
+        if (controller) {
+          controller.send(JSON.stringify(msg));
+        }
+        this.controllerRequests.delete(msg.id);
       }
     }
-    // Events from extension are ignored for now (v1 — no MCP event streaming)
+
+    // Broadcast extension events to all controllers
+    if (msg.type === 'event') {
+      for (const controller of this.controllers.values()) {
+        controller.send(JSON.stringify(msg));
+      }
+    }
+  }
+
+  private broadcastExtensionStatus(connected: boolean): void {
+    const notification: ExtensionStatusNotification = {
+      type: 'extension_status',
+      connected,
+    };
+    for (const controller of this.controllers.values()) {
+      controller.send(JSON.stringify(notification));
+    }
   }
 
   /** Send a command to extension and await response. */
@@ -150,7 +286,7 @@ export class ExtensionServer {
         reject(new Error('Command timeout'));
       }, timeoutMs);
 
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, controllerId: '' });
 
       this.ws!.send(JSON.stringify({
         id,
@@ -171,6 +307,11 @@ export class ExtensionServer {
       this.ws.close();
       this.ws = null;
     }
+    for (const ws of this.controllers.values()) {
+      ws.close();
+    }
+    this.controllers.clear();
+    this.controllerRequests.clear();
     if (this.wss) {
       this.wss.close();
       this.wss = null;
@@ -184,5 +325,6 @@ export class ExtensionServer {
       entry.reject(new Error(reason));
       this.pending.delete(id);
     }
+    this.controllerRequests.clear();
   }
 }
