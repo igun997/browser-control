@@ -6,6 +6,7 @@ describe('parseArgs', () => {
     const result = parseArgs([]);
     expect(result.port).toBe(8765);
     expect(result.token).toBeUndefined();
+    expect(result.daemon).toBeUndefined();
   });
 
   it('parses --port', () => {
@@ -16,6 +17,18 @@ describe('parseArgs', () => {
   it('parses --token', () => {
     const result = parseArgs(['--token', 'mysecret']);
     expect(result.token).toBe('mysecret');
+  });
+
+  it('parses --daemon', () => {
+    const result = parseArgs(['--daemon']);
+    expect(result.daemon).toBe(true);
+  });
+
+  it('parses --daemon with other flags', () => {
+    const result = parseArgs(['--daemon', '--port', '9000', '--token', 'secret']);
+    expect(result.daemon).toBe(true);
+    expect(result.port).toBe(9000);
+    expect(result.token).toBe('secret');
   });
 
   it('reads BROWSER_CONTROLS_PORT env', () => {

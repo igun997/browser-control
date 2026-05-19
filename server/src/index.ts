@@ -8,6 +8,7 @@ import { createMcpServer } from './mcp.js';
 export interface ServerConfig {
   port: number;
   token?: string;
+  daemon?: boolean;
 }
 
 export function parseArgs(
@@ -16,6 +17,7 @@ export function parseArgs(
 ): ServerConfig {
   let port = 8765;
   let token: string | undefined;
+  let daemon = false;
 
   // Env defaults
   const envPort = env['BROWSER_CONTROLS_PORT'];
@@ -38,12 +40,17 @@ export function parseArgs(
     } else if (arg === '--token' && args[i + 1] !== undefined) {
       token = args[i + 1]!;
       i++;
+    } else if (arg === '--daemon') {
+      daemon = true;
     }
   }
 
   const config: ServerConfig = { port };
   if (token !== undefined) {
     config.token = token;
+  }
+  if (daemon) {
+    config.daemon = true;
   }
   return config;
 }
@@ -66,6 +73,25 @@ async function tryConnectController(port: number, token: string | undefined, tim
 
 async function main(): Promise<void> {
   const config = parseArgs(process.argv.slice(2));
+
+  if (config.daemon) {
+    const extensionServer = new ExtensionServer({
+      port: config.port,
+      ...(config.token !== undefined ? { token: config.token } : {}),
+    });
+    const actualPort = await extensionServer.start();
+    console.error(`[browser-controls] Running in daemon mode on port ${actualPort}`);
+
+    const shutdown = async () => {
+      console.error('[browser-controls] Shutting down...');
+      extensionServer.close();
+      process.exit(0);
+    };
+
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+    return;
+  }
 
   const controllerClient = await tryConnectController(config.port, config.token, 2000);
 
