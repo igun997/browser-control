@@ -133,9 +133,42 @@ cd server && npm install
 npm run build
 ```
 
-### Usage with Claude Desktop
+### Running Modes
 
-Add to `claude_desktop_config.json`:
+The MCP server supports two modes:
+
+#### Standalone Mode (default)
+
+Starts both WS server and MCP server in one process:
+
+```bash
+node server/dist/index.js
+```
+
+Extension connects directly. Simple but MCP process death kills WS connection.
+
+#### Daemon + Controller Mode (recommended)
+
+Run WS server as persistent daemon, MCP connects as controller client:
+
+```bash
+# Terminal 1: Start daemon (persistent)
+node server/dist/index.js --daemon
+
+# Terminal 2: MCP server auto-detects daemon and connects as controller
+node server/dist/index.js
+```
+
+Benefits:
+- Extension stays connected when MCP restarts
+- Multiple MCP clients can connect simultaneously
+- Daemon survives MCP process crashes
+
+Auto-detect: MCP server tries to connect to daemon first. If no daemon found, falls back to standalone mode.
+
+### Usage with Claude Desktop / pi
+
+Add to MCP config:
 
 ```json
 {
@@ -151,12 +184,15 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
+For reliable operation, start daemon first: `node server/dist/index.js --daemon`
+
 ### CLI Options
 
 | Flag | Env Var | Default | Description |
 |------|---------|---------|-------------|
 | `--port` | `BROWSER_CONTROLS_PORT` | 8765 | WebSocket port |
 | `--token` | `BROWSER_CONTROLS_TOKEN` | — | Auth token |
+| `--daemon` | — | — | Run WS server only (no MCP) |
 
 ### Available Tools
 
