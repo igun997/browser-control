@@ -18,7 +18,16 @@ interface ContentResponse {
 }
 
 // Helper to resolve tab target from params.tabId
-function resolveTabIdParam(tabId: unknown, activeTabId: number | undefined): number {
+// Falls back to querying Chrome for the current active tab when tabId is 'active'
+// and no activeTabId is set (e.g., popup-initiated commands)
+async function resolveTabIdParam(tabId: unknown, activeTabId: number | undefined): Promise<number> {
+  if (tabId === 'active' && activeTabId === undefined) {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+      throw new BrowserControlsError('NO_ACTIVE_TAB', 'No active tab available');
+    }
+    return tab.id;
+  }
   return resolveTabTarget(tabId, activeTabId);
 }
 
@@ -98,7 +107,7 @@ export class CommandRouter {
       throw new BrowserControlsError('INVALID_URL', 'URL must be a valid http or https URL');
     }
 
-    const tabId = resolveTabIdParam(params.tabId, this.activeTabId);
+    const tabId = await resolveTabIdParam(params.tabId, this.activeTabId);
 
     await chrome.tabs.update(tabId, { url });
 
@@ -140,7 +149,7 @@ export class CommandRouter {
       );
     }
 
-    const tabId = resolveTabIdParam(params.tabId, this.activeTabId);
+    const tabId = await resolveTabIdParam(params.tabId, this.activeTabId);
 
     return this.deepNetworkInspector.start(tabId);
   }
@@ -153,7 +162,7 @@ export class CommandRouter {
       );
     }
 
-    const tabId = resolveTabIdParam(params.tabId, this.activeTabId);
+    const tabId = await resolveTabIdParam(params.tabId, this.activeTabId);
 
     return this.deepNetworkInspector.stop(tabId);
   }
@@ -166,7 +175,7 @@ export class CommandRouter {
       );
     }
 
-    const tabId = resolveTabIdParam(params.tabId, this.activeTabId);
+    const tabId = await resolveTabIdParam(params.tabId, this.activeTabId);
     const requestId = params.requestId;
 
     // Validate requestId is a non-empty string
@@ -184,7 +193,7 @@ export class CommandRouter {
     method: string,
     params: Record<string, unknown>
   ): Promise<unknown> {
-    const tabId = resolveTabIdParam(params.tabId, this.activeTabId);
+    const tabId = await resolveTabIdParam(params.tabId, this.activeTabId);
 
     const message: ContentMessage = { method, params };
 
