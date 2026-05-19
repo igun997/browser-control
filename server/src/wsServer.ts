@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { HelloMessage } from '../../extension/src/shared/protocol.js';
+/** Matches extension HelloMessage shape — inlined to avoid cross-package import */
+interface HelloMessage {
+  type: 'hello';
+  version: string;
+  permissions: string[];
+  tabs: Array<{ id: number; url?: string; title?: string; active: boolean }>;
+  token?: string;
+}
 
 export interface ExtensionServerOptions {
   port: number;
@@ -32,7 +39,7 @@ export class ExtensionServer {
 
       this.wss.on('listening', () => {
         const addr = this.wss!.address();
-        const actualPort = typeof addr === 'object' ? addr.port : this.port;
+        const actualPort = typeof addr === 'object' && addr !== null ? addr.port : this.port;
         resolve(actualPort);
       });
 

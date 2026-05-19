@@ -114,7 +114,7 @@ export function createMcpServer(bridge: Bridge): McpServer {
         description: tool.description,
         inputSchema: tool.inputSchema,
       },
-      async (params) => {
+      async (params: Record<string, unknown>) => {
         try {
           const result = await bridge.call(tool.name, params as Record<string, unknown>);
 
