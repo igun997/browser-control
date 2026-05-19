@@ -8,7 +8,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "build": "vite build --config extension/vite.config.ts && npm run copy-assets",
-    "copy-assets": "copyfiles -u 1 extension/manifest.json dist/ && cp dist/src/popup/index.html dist/popup.html && node -e \"const fs=require('fs'); fs.writeFileSync('dist/popup.html', fs.readFileSync('dist/popup.html','utf8').replace(/src=\\\"[^\\\"]*popup\\.js\\\"/g, 'src=\\\"./popup.js\\\"'));\" && rm -rf dist/src"
+    "copy-assets": "copyfiles -u 1 extension/manifest.json dist/ && cp dist/src/popup/index.html dist/popup.html && node -e \"const fs=require('fs'); fs.writeFileSync('dist/popup.html', fs.readFileSync('dist/popup.html','utf8').replace(/src=\\\"[^\\\"]*popup\\.js\\\"/g, 'src=\\\"./popup.js\\\"'));\" && rm -rf dist/src",
+    "server:build": "cd server && npm run build",
+    "server:start": "node server/dist/index.js"
   },
   "devDependencies": {
     "@types/chrome": "latest",

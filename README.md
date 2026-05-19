@@ -121,3 +121,56 @@ npm run build
 - **Background Script**: WebSocket server, command routing, network inspection
 - **Content Script**: DOM manipulation, element inspection, user interactions
 - **Popup**: UI for connection status and quick actions
+
+## MCP Server
+
+Bridge between AI agents (via MCP stdio) and the Chrome extension (via WebSocket).
+
+### Setup
+
+```bash
+cd server && npm install
+npm run build
+```
+
+### Usage with Claude Desktop
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "browser-controls": {
+      "command": "node",
+      "args": ["/path/to/browser-controls/server/dist/index.js"],
+      "env": {
+        "BROWSER_CONTROLS_PORT": "8765"
+      }
+    }
+  }
+}
+```
+
+### CLI Options
+
+| Flag | Env Var | Default | Description |
+|------|---------|---------|-------------|
+| `--port` | `BROWSER_CONTROLS_PORT` | 8765 | WebSocket port |
+| `--token` | `BROWSER_CONTROLS_TOKEN` | — | Auth token |
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `navigate` | Navigate tab to URL |
+| `inspect` | Get element info by selector |
+| `inspect_start` | Start DOM picker mode |
+| `inspect_stop` | Stop DOM picker mode |
+| `query_dom` | Query elements by selector |
+| `click` | Click element |
+| `type` | Type text into element |
+| `scroll` | Scroll page or element |
+| `screenshot` | Capture visible tab (PNG) |
+| `network_deep_start` | Start CDP network capture |
+| `network_deep_stop` | Stop CDP network capture |
+| `network_get_response_body` | Get captured response body |
