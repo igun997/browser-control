@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 
 interface ControllerHelloMessage {
@@ -52,6 +53,7 @@ export class ControllerClient {
   private extensionConnected = false;
   private handshakeResolve: ((ack: ControllerHelloAck) => void) | null = null;
   private handshakeReject: ((reason: Error) => void) | null = null;
+  private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: ControllerClientOptions) {
     this.port = options.port;
@@ -68,6 +70,15 @@ export class ControllerClient {
 
       this.ws = new WebSocket(`ws://localhost:${this.port}`);
 
+      this.handshakeTimer = setTimeout(() => {
+        if (this.handshakeReject) {
+          this.handshakeReject(new Error('Handshake timeout'));
+          this.handshakeReject = null;
+          this.handshakeResolve = null;
+        }
+        this.ws?.close();
+      }, 5000);
+
       this.ws.on('open', () => {
         const hello: ControllerHelloMessage = { type: 'controller_hello' };
         if (this.token !== undefined) {
@@ -81,6 +92,7 @@ export class ControllerClient {
       });
 
       this.ws.on('error', (err) => {
+        this.clearHandshakeTimer();
         if (this.handshakeReject) {
           this.handshakeReject(err);
           this.handshakeReject = null;
@@ -89,6 +101,7 @@ export class ControllerClient {
       });
 
       this.ws.on('close', () => {
+        this.clearHandshakeTimer();
         this.rejectAllPending('Connection closed');
         if (this.handshakeReject) {
           this.handshakeReject(new Error('Connection closed before handshake'));
@@ -108,8 +121,17 @@ export class ControllerClient {
     }
 
     if (msg.type === 'controller_hello_ack') {
+      if (typeof msg.sessionId !== 'string' || typeof msg.extensionConnected !== 'boolean') {
+        if (this.handshakeReject) {
+          this.handshakeReject(new Error('Invalid controller_hello_ack'));
+          this.handshakeReject = null;
+          this.handshakeResolve = null;
+        }
+        return;
+      }
       const ack = msg as unknown as ControllerHelloAck;
       this.extensionConnected = ack.extensionConnected;
+      this.clearHandshakeTimer();
       if (this.handshakeResolve) {
         this.handshakeResolve(ack);
         this.handshakeResolve = null;
@@ -147,8 +169,11 @@ export class ControllerClient {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error('Not connected'));
     }
+    if (!this.extensionConnected) {
+      return Promise.reject(new Error('Extension not connected'));
+    }
 
-    const id = crypto.randomUUID();
+    const id = randomUUID();
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -174,6 +199,7 @@ export class ControllerClient {
   }
 
   close(): void {
+    this.clearHandshakeTimer();
     this.rejectAllPending('Client closing');
     if (this.ws) {
       this.ws.close();
@@ -182,6 +208,13 @@ export class ControllerClient {
     this.extensionConnected = false;
     this.handshakeResolve = null;
     this.handshakeReject = null;
+  }
+
+  private clearHandshakeTimer(): void {
+    if (this.handshakeTimer) {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = null;
+    }
   }
 
   private rejectAllPending(reason: string): void {
