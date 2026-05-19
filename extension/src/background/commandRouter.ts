@@ -21,12 +21,18 @@ interface ContentResponse {
 // Falls back to querying Chrome for the current active tab when tabId is 'active'
 // and no activeTabId is set (e.g., popup-initiated commands)
 async function resolveTabIdParam(tabId: unknown, activeTabId: number | undefined): Promise<number> {
-  if (tabId === 'active' && activeTabId === undefined) {
+  // When tabId is omitted (undefined) or 'active', and no activeTabId cached,
+  // query Chrome for the current active tab.
+  if ((tabId === undefined || tabId === 'active') && activeTabId === undefined) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) {
       throw new BrowserControlsError('NO_ACTIVE_TAB', 'No active tab available');
     }
     return tab.id;
+  }
+  // If tabId omitted but activeTabId is set, use it
+  if (tabId === undefined) {
+    return activeTabId!;
   }
   return resolveTabTarget(tabId, activeTabId);
 }

@@ -202,63 +202,70 @@ export function inspectElement(element: HTMLElement): InspectResult {
   };
 }
 
-export interface InspectHandlerOptions {
-  sendMessage?: (message: { ok: boolean; result?: InspectResult; error?: { code: string; message: string } }) => void;
+/**
+ * Query all elements matching a CSS selector and return inspection results.
+ */
+export function queryDom(selector: string): InspectResult[] {
+  const elements = document.querySelectorAll<HTMLElement>(selector);
+  return Array.from(elements).map(inspectElement);
 }
 
+export interface InspectHandlerOptions {
+  sendMessage?: (message: { ok: boolean; result?: InspectResult | InspectResult[]; error?: { code: string; message: string } }) => void;
+}
+
+type HandlerResponse = { ok: boolean; result?: InspectResult | InspectResult[]; error?: { code: string; message: string } };
+
 /**
- * Setup message handler for 'inspect' method using chrome.runtime.onMessage.
- * Handles {method:'inspect', params:{selector}} messages and sends back results.
- * Returns true if message was handled, false otherwise.
+ * Setup message handler for 'inspect' and 'query DOM' methods.
+ * - inspect: returns single InspectResult for first matching element
+ * - query DOM: returns InspectResult[] for all matching elements
  */
-export function setupInspectHandler(options: InspectHandlerOptions = {}): (message: object, _sender: object, sendResponse: (response?: { ok: boolean; result?: InspectResult; error?: { code: string; message: string } }) => void) => boolean {
-  const sendMessage = options.sendMessage ?? ((message: { ok: boolean; result?: InspectResult; error?: { code: string; message: string } }) => {
+export function setupInspectHandler(options: InspectHandlerOptions = {}): (message: object, _sender: object, sendResponse: (response?: HandlerResponse) => void) => boolean {
+  const sendMessage = options.sendMessage ?? ((message: HandlerResponse) => {
     chrome.runtime.sendMessage(message);
   });
 
-  return (message: object, _sender: object, sendResponse: (response?: { ok: boolean; result?: InspectResult; error?: { code: string; message: string } }) => void): boolean => {
+  return (message: object, _sender: object, sendResponse: (response?: HandlerResponse) => void): boolean => {
     const data = message as { method: string; params?: { selector?: string } };
 
-    // Only handle inspect method
-    if (data.method !== 'inspect') {
-      return false;
-    }
-
-    const selector = data.params?.selector;
-    if (!selector) {
-      sendResponse({
-        ok: false,
-        error: {
-          code: 'INVALID_PARAMS',
-          message: 'Missing selector parameter',
-        },
-      });
+    if (data.method === 'inspect') {
+      const selector = data.params?.selector;
+      if (!selector) {
+        sendResponse({ ok: false, error: { code: 'INVALID_PARAMS', message: 'Missing selector parameter' } });
+        return true;
+      }
+      try {
+        sendResponse({ ok: true, result: inspectSelector(String(selector)) });
+      } catch (error) {
+        if (error instanceof BrowserControlsError) {
+          sendResponse({ ok: false, error: { code: error.code, message: error.message } });
+        } else {
+          sendResponse({ ok: false, error: { code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : String(error) } });
+        }
+      }
       return true;
     }
 
-    try {
-      const result = inspectSelector(String(selector));
-      sendResponse({ ok: true, result });
-    } catch (error) {
-      if (error instanceof BrowserControlsError) {
-        sendResponse({
-          ok: false,
-          error: {
-            code: error.code,
-            message: error.message,
-          },
-        });
-      } else {
-        sendResponse({
-          ok: false,
-          error: {
-            code: 'INTERNAL_ERROR',
-            message: error instanceof Error ? error.message : String(error),
-          },
-        });
+    if (data.method === 'query DOM') {
+      const selector = data.params?.selector;
+      if (!selector) {
+        sendResponse({ ok: false, error: { code: 'INVALID_PARAMS', message: 'Missing selector parameter' } });
+        return true;
       }
+      try {
+        sendResponse({ ok: true, result: queryDom(String(selector)) });
+      } catch (error) {
+        if (error instanceof BrowserControlsError) {
+          sendResponse({ ok: false, error: { code: error.code, message: error.message } });
+        } else {
+          sendResponse({ ok: false, error: { code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : String(error) } });
+        }
+      }
+      return true;
     }
-    return true;
+
+    return false;
   };
 }
 
