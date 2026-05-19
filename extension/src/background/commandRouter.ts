@@ -189,6 +189,22 @@ export class CommandRouter {
     return this.deepNetworkInspector.getResponseBody(tabId, requestId);
   }
 
+  /**
+   * Send a message to the content script, injecting it first if needed.
+   */
+  private async sendToContentScript(tabId: number, message: ContentMessage): Promise<ContentResponse> {
+    try {
+      return await chrome.tabs.sendMessage(tabId, message) as ContentResponse;
+    } catch {
+      // Content script likely not injected — inject and retry once
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['content.js'],
+      });
+      return await chrome.tabs.sendMessage(tabId, message) as ContentResponse;
+    }
+  }
+
   private async handleContentCommand(
     method: string,
     params: Record<string, unknown>
@@ -198,7 +214,7 @@ export class CommandRouter {
     const message: ContentMessage = { method, params };
 
     try {
-      const response = await chrome.tabs.sendMessage(tabId, message) as ContentResponse;
+      const response = await this.sendToContentScript(tabId, message);
 
       if (response.ok) {
         return response.result;
