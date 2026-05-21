@@ -1,200 +1,75 @@
 # Browser Controls
 
-A Chrome extension that exposes browser automation commands via WebSocket, enabling AI agents to control a Chrome browser session programmatically.
+Chrome extension + MCP server that lets AI agents control a browser via WebSocket.
 
-## Commands
+---
 
-| Command | Description | Parameters |
-|---------|-------------|------------|
-| `navigate` | Navigate to a URL | `url` (string, required), `tabId` (number or 'active', optional) |
-| `inspect` | Get element info at coordinates | `selector` (string), `tabId` (optional) |
-| `inspect:start` | Start DOM inspection mode | `tabId` (optional) |
-| `inspect:stop` | Stop DOM inspection mode | `tabId` (optional) |
-| `query DOM` | Query DOM elements using CSS selector or XPath | `selector` (string, required), `tabId` (optional) |
-| `click` | Click an element | `selector` (string, required), `tabId` (optional) |
-| `type` | Type text into an element | `selector` (string, required), `text` (string, required), `tabId` (optional) |
-| `scroll` | Scroll an element into view | `x` (number, optional), `y` (number, optional), `selector` (string, optional), `tabId` (optional) |
-| `screenshot` | Capture visible tab screenshot | Returns data URL |
-| `network:deep:start` | Start deep network monitoring | `tabId` (optional) |
-| `network:getResponseBody` | Get response body for a request | `requestId` (string, required), `tabId` (optional) |
-| `network:deep:stop` | Stop deep network monitoring | `tabId` (optional) |
+## Quick Start
 
-## Events
-
-The extension emits the following events via WebSocket:
-
-- `tab:updated` - Tab content was updated
-- `tab:activated` - Tab was activated/focused
-- `inspect:hover` - Element hovered during inspection
-- `inspect:select` - Element selected during inspection
-- `network:request` - Network request initiated
-- `network:response` - Network response received
-- `network:complete` - Network request completed
-- `network:error` - Network request error
-- `cdp:Network.*` - Deep mode CDP network events
-
-## Protocol
-
-Communication uses JSON messages over WebSocket.
-
-### Message Format
-
-**Request:**
-```json
-{
-  "id": "unique-request-id",
-  "type": "request",
-  "method": "command-name",
-  "params": { /* command parameters */ },
-  "tabId": 123  // optional: target specific tab
-}
-```
-
-**Response:**
-```json
-{
-  "id": "unique-request-id",
-  "type": "response",
-  "result": { /* response data */ }
-}
-```
-
-**Error:**
-```json
-{
-  "id": "unique-request-id",
-  "type": "response",
-  "error": {
-    "code": "ERROR_CODE",
-    "message": "Human readable message"
-  }
-}
-```
-
-### Handshake
-
-1. Agent sends `hello` message with version and permissions:
-```json
-{
-  "type": "hello",
-  "version": "1.0",
-  "permissions": ["tabs", "network", "inspect"]
-}
-```
-
-2. Extension responds with `hello_ack` containing session ID:
-```json
-{
-  "type": "hello_ack",
-  "sessionId": "unique-session-id",
-  "version": "1.0"
-}
-```
-
-## Development
+### 1. Install Extension
 
 ```bash
-# Install dependencies
+# Clone & build
+git clone <repo-url> && cd browser-controls
 npm install
-
-# Run tests
-npm test
-
-# Type check
-npm run typecheck
-
-# Build for production
 npm run build
 ```
 
-### Loading the Extension
+Load in Chrome:
+1. Go to `chrome://extensions`
+2. Enable **Developer mode** (top right)
+3. Click **Load unpacked** → select the `dist/` folder
+4. Click extension icon to open popup — shows connection status
 
-1. Run `npm run build`
-2. Open Chrome and navigate to `chrome://extensions`
-3. Enable "Developer mode"
-4. Click "Load unpacked" and select the `dist` directory
-5. Click the extension icon in Chrome to activate the popup
-6. The extension will start a WebSocket server on the configured port
-
-## Architecture
-
-- **Background Script**: WebSocket server, command routing, network inspection
-- **Content Script**: DOM manipulation, element inspection, user interactions
-- **Popup**: UI for connection status and quick actions
-
-## MCP Server
-
-Bridge between AI agents (via MCP stdio) and the Chrome extension (via WebSocket).
-
-### Setup
+### 2. Run Daemon
 
 ```bash
-cd server && npm install
-npm run build
-```
+# Build server
+cd server && npm install && npm run build && cd ..
 
-### Running Modes
-
-The MCP server supports two modes:
-
-#### Standalone Mode (default)
-
-Starts both WS server and MCP server in one process:
-
-```bash
-node server/dist/index.js
-```
-
-Extension connects directly. Simple but MCP process death kills WS connection.
-
-#### Daemon + Controller Mode (recommended)
-
-Run WS server as persistent daemon, MCP connects as controller client:
-
-```bash
-# Terminal 1: Start daemon (persistent)
+# Start daemon (keeps WS alive across MCP restarts)
 node server/dist/index.js --daemon
-
-# Terminal 2: MCP server auto-detects daemon and connects as controller
-node server/dist/index.js
 ```
 
-Benefits:
-- Extension stays connected when MCP restarts
-- Multiple MCP clients can connect simultaneously
-- Daemon survives MCP process crashes
+Extension auto-connects to `ws://localhost:8765`.
 
-Auto-detect: MCP server tries to connect to daemon first. If no daemon found, falls back to standalone mode.
+### 3. Add MCP to Cursor
 
-### Usage with Claude Desktop / pi
-
-Add to MCP config:
+In Cursor settings, add to your MCP config (`.cursor/mcp.json` or global):
 
 ```json
 {
   "mcpServers": {
     "browser-controls": {
       "command": "node",
-      "args": ["/path/to/browser-controls/server/dist/index.js"],
+      "args": ["/absolute/path/to/browser-controls/server/dist/index.js"]
+    }
+  }
+}
+```
+
+MCP server auto-detects running daemon. If no daemon, runs standalone.
+
+Optional env vars:
+
+```json
+{
+  "mcpServers": {
+    "browser-controls": {
+      "command": "node",
+      "args": ["/absolute/path/to/browser-controls/server/dist/index.js"],
       "env": {
-        "BROWSER_CONTROLS_PORT": "8765"
+        "BROWSER_CONTROLS_PORT": "8765",
+        "BROWSER_CONTROLS_TOKEN": "your-secret-token"
       }
     }
   }
 }
 ```
 
-For reliable operation, start daemon first: `node server/dist/index.js --daemon`
+---
 
-### CLI Options
-
-| Flag | Env Var | Default | Description |
-|------|---------|---------|-------------|
-| `--port` | `BROWSER_CONTROLS_PORT` | 8765 | WebSocket port |
-| `--token` | `BROWSER_CONTROLS_TOKEN` | — | Auth token |
-| `--daemon` | — | — | Run WS server only (no MCP) |
-
-### Available Tools
+## Available MCP Tools
 
 | Tool | Description |
 |------|-------------|
@@ -202,7 +77,7 @@ For reliable operation, start daemon first: `node server/dist/index.js --daemon`
 | `inspect` | Get element info by selector |
 | `inspect_start` | Start DOM picker mode |
 | `inspect_stop` | Stop DOM picker mode |
-| `query_dom` | Query elements by selector |
+| `query_dom` | Query elements by CSS/XPath |
 | `click` | Click element |
 | `type` | Type text into element |
 | `scroll` | Scroll page or element |
@@ -210,3 +85,62 @@ For reliable operation, start daemon first: `node server/dist/index.js --daemon`
 | `network_deep_start` | Start CDP network capture |
 | `network_deep_stop` | Stop CDP network capture |
 | `network_get_response_body` | Get captured response body |
+
+---
+
+## CLI Reference
+
+| Flag | Env Var | Default | Description |
+|------|---------|---------|-------------|
+| `--port` | `BROWSER_CONTROLS_PORT` | `8765` | WebSocket port |
+| `--token` | `BROWSER_CONTROLS_TOKEN` | — | Auth token (optional) |
+| `--daemon` | — | — | Run WS server only (no MCP) |
+
+---
+
+## Architecture
+
+```
+┌─────────────┐   WebSocket   ┌──────────────┐   stdio   ┌────────┐
+│  Chrome Ext  │◄────────────►│  Daemon/MCP   │◄─────────►│ Cursor │
+└─────────────┘               └──────────────┘            └────────┘
+```
+
+- **Extension** (`dist/`): Background script runs WS client, content script handles DOM
+- **Daemon** (`server/`): Persistent WS server, survives MCP restarts
+- **MCP Server** (`server/`): Bridges MCP stdio ↔ WS commands
+
+### Daemon vs Standalone
+
+| Mode | Command | Use case |
+|------|---------|----------|
+| Daemon | `node server/dist/index.js --daemon` | Production — extension stays connected |
+| Standalone | `node server/dist/index.js` | Quick test — all-in-one process |
+
+---
+
+## Development
+
+```bash
+npm install          # Extension deps
+npm test             # Run tests
+npm run typecheck    # Type check
+npm run build        # Build extension → dist/
+
+cd server
+npm install          # Server deps
+npm run build        # Build server → server/dist/
+```
+
+---
+
+## Protocol
+
+JSON messages over WebSocket. See [full protocol docs](docs/) for request/response format, handshake, and events.
+
+### Events Emitted
+
+- `tab:updated` / `tab:activated` — Tab changes
+- `inspect:hover` / `inspect:select` — DOM inspection
+- `network:request` / `network:response` / `network:complete` / `network:error` — Network
+- `cdp:Network.*` — Deep mode CDP events
