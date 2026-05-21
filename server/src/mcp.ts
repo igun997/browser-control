@@ -101,11 +101,87 @@ export const TOOL_DEFINITIONS = [
   },
 ] as const;
 
+// Google Places review resources
+const GOOGLE_REVIEW_PLACES = [
+  {
+    name: 'Javapixa',
+    placeId: 'ChIJwUARo85rei4RSZlO6D6f77A',
+  },
+] as const;
+
+const GOOGLE_REVIEW_WIDGET_TEMPLATE = 'https://www.google.com/maps/api/js/ReviewsService.LoadWriteWidget?hl=id&key=AIzaSyBcv0QfUNUfBwo8pIGJ3teNCkaluSGUWus&authuser=0&entryPoint=1&placeid={PLACE_ID}&cb=85237367';
+
+function buildReviewUrl(placeId: string): string {
+  return GOOGLE_REVIEW_WIDGET_TEMPLATE.replace('{PLACE_ID}', placeId);
+}
+
 export function createMcpServer(bridge: Bridge): McpServer {
   const server = new McpServer({
     name: 'browser-controls',
     version: '0.1.0',
   });
+
+  // Register Google review resources
+  server.registerResource(
+    'google-review-guide',
+    'guide://google-review/how-to',
+    {
+      description: 'How to automate Google reviews using browser-controls',
+    },
+    async () => ({
+      contents: [{
+        uri: 'guide://google-review/how-to',
+        mimeType: 'text/markdown',
+        text: `# Google Review Automation Guide
+
+## Method
+Navigate to the review widget URL directly. Replace \`{PLACE_ID}\` with target place ID.
+
+## Widget URL Template
+\`\`\`
+${GOOGLE_REVIEW_WIDGET_TEMPLATE}
+\`\`\`
+
+## Steps
+1. Navigate to widget URL with target place ID
+2. Wait for page load — stars and textbox render directly (no iframe issues)
+3. Click star rating (1-5 stars)
+4. Type review text in textarea
+5. Click submit button
+
+## Known Places
+${GOOGLE_REVIEW_PLACES.map(p => `- **${p.name}**: \`${p.placeId}\` → ${buildReviewUrl(p.placeId)}`).join('\n')}
+
+## Important
+- Use UI interactions only — do NOT replay network POST requests
+- Stars, textbox, submit are DOM-accessible when opened directly
+- authuser=0 means first logged-in Google account in browser
+`,
+      }],
+    }),
+  );
+
+  server.registerResource(
+    'google-review-places',
+    'data://google-review/places',
+    {
+      description: 'Known Google Place IDs for review automation',
+    },
+    async () => ({
+      contents: [{
+        uri: 'data://google-review/places',
+        mimeType: 'application/json',
+        text: JSON.stringify(
+          GOOGLE_REVIEW_PLACES.map(p => ({
+            ...p,
+            reviewUrl: buildReviewUrl(p.placeId),
+          })),
+          null,
+          2,
+        ),
+      }],
+    }),
+  );
 
   for (const tool of TOOL_DEFINITIONS) {
     server.registerTool(
