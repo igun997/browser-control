@@ -136,30 +136,97 @@ export function createMcpServer(bridge: Bridge): McpServer {
       contents: [{
         uri: 'guide://google-review/how-to',
         mimeType: 'text/markdown',
-        text: `# Google Review Automation Guide
+        text: `# Google Review Automation — Proven Method
 
-## Method
-Navigate to the review widget URL directly. Replace \`{PLACE_ID}\` with target place ID.
+## Overview
+Post a Google review by navigating directly to the review widget URL.
+This bypasses cross-origin iframe restrictions and gives full DOM access to stars, textarea, and submit button.
 
 ## Widget URL Template
 \`\`\`
-${GOOGLE_REVIEW_WIDGET_TEMPLATE}
+https://www.google.com/maps/api/js/ReviewsService.LoadWriteWidget?hl=id&key=AIzaSyBcv0QfUNUfBwo8pIGJ3teNCkaluSGUWus&authuser=0&entryPoint=1&placeid={PLACE_ID}&cb=85237367
 \`\`\`
 
-## Steps
-1. Navigate to widget URL with target place ID
-2. Wait for page load — stars and textbox render directly (no iframe issues)
-3. Click star rating (1-5 stars)
-4. Type review text in textarea
-5. Click submit button
+Replace \`{PLACE_ID}\` with the target Google Place ID.
 
-## Known Places
-${GOOGLE_REVIEW_PLACES.map(p => `- **${p.name}**: \`${p.placeId}\` → ${buildReviewUrl(p.placeId)}`).join('\n')}
+## Step-by-Step Procedure
 
-## Important
-- Use UI interactions only — do NOT replay network POST requests
-- Stars, textbox, submit are DOM-accessible when opened directly
-- authuser=0 means first logged-in Google account in browser
+### Step 1: Navigate to Widget URL
+\`\`\`
+navigate({ url: "<widget_url_with_place_id>" })
+\`\`\`
+
+### Step 2: Select Star Rating
+Query stars with:
+\`\`\`
+query_dom({ selector: 'div.s2xyy[role="radio"]' })
+\`\`\`
+
+Stars have these aria-labels (Indonesian locale):
+- \`aria-label="Satu bintang"\` → 1 star
+- \`aria-label="Dua bintang"\` → 2 stars
+- \`aria-label="Tiga bintang"\` → 3 stars
+- \`aria-label="Empat bintang"\` → 4 stars
+- \`aria-label="Lima bintang"\` → 5 stars
+
+Click desired rating:
+\`\`\`
+click({ selector: 'div.s2xyy[role="radio"][aria-label="Lima bintang"]' })
+\`\`\`
+
+### Step 3: Type Review Text (Optional)
+If review text is needed, find textarea and type:
+\`\`\`
+query_dom({ selector: 'textarea' })
+type({ selector: 'textarea', text: "Your review text here" })
+\`\`\`
+
+If no message needed, skip this step.
+
+### Step 4: Submit Review
+Click the "Posting" button:
+\`\`\`
+click({ selector: 'button.VfPpkd-LgbsSe.VfPpkd-LgbsSe-OWXEXe-k8QpJ.VfPpkd-LgbsSe-OWXEXe-dgl2Hf' })
+\`\`\`
+
+Alternative selector if above fails:
+\`\`\`
+query_dom({ selector: 'button' })
+\`\`\`
+Look for button with textSnippet "Posting" or "Post".
+
+### Step 5: Verify Success
+Query page for confirmation:
+\`\`\`
+query_dom({ selector: 'div.T4LgNb' })
+\`\`\`
+Success indicator: textSnippet contains "+1 poin" or "Anda mendapatkan poin" or "thank".
+
+## How to Find a Place ID (if unknown)
+
+1. Navigate to Google Search:
+   \`\`\`
+   navigate({ url: "https://www.google.com/search?q=<business_name>+review" })
+   \`\`\`
+
+2. Find and click "Write a review" button:
+   \`\`\`
+   query_dom({ selector: 'a.hlCiSb.ab_button' })
+   click({ selector: 'a.hlCiSb.ab_button' })
+   \`\`\`
+
+3. Extract place ID from iframe src:
+   \`\`\`
+   query_dom({ selector: 'iframe.goog-reviews-write-widget' })
+   \`\`\`
+   The \`src\` attribute contains \`placeid=<PLACE_ID>\`.
+
+## Rules
+- ALWAYS use UI interactions — never replay network POST requests
+- authuser=0 = first logged-in Google account in browser
+- Widget renders stars/textarea/submit as direct DOM (no iframe nesting)
+- If star selectors fail, try \`query_dom({ selector: '[role="radio"]' })\`
+- If submit button selector fails, try \`query_dom({ selector: 'button' })\` and find "Posting"/"Post"
 `,
       }],
     }),
