@@ -107,6 +107,10 @@ const GOOGLE_REVIEW_PLACES = [
     name: 'Javapixa',
     placeId: 'ChIJwUARo85rei4RSZlO6D6f77A',
   },
+  {
+    name: 'PT Eluon Solusi Indonesia',
+    placeId: 'ChIJ-zDfgd7zaS4RZk3Xz2DufZE',
+  },
 ] as const;
 
 const GOOGLE_REVIEW_WIDGET_TEMPLATE = 'https://www.google.com/maps/api/js/ReviewsService.LoadWriteWidget?hl=id&key=AIzaSyBcv0QfUNUfBwo8pIGJ3teNCkaluSGUWus&authuser=0&entryPoint=1&placeid={PLACE_ID}&cb=85237367';
